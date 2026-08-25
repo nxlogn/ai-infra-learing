@@ -1,0 +1,3 @@
+C:/project/cpplearn/build/CMakeFiles/cpplearn.dir
+C:/project/cpplearn/build/CMakeFiles/edit_cache.dir
+C:/project/cpplearn/build/CMakeFiles/rebuild_cache.dir

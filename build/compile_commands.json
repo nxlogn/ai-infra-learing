@@ -1,0 +1,8 @@
+[
+{
+  "directory": "C:/project/cpplearn/build",
+  "command": "C:\\Strawberry\\c\\bin\\g++.exe -g -std=gnu++17 -o CMakeFiles\\cpplearn.dir\\src\\main.cpp.obj -c C:\\project\\cpplearn\\src\\main.cpp",
+  "file": "C:\\project\\cpplearn\\src\\main.cpp",
+  "output": "CMakeFiles\\cpplearn.dir\\src\\main.cpp.obj"
+}
+]
