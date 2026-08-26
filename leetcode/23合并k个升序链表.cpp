@@ -12,6 +12,7 @@ struct ListNode {
 struct cmp {
   bool operator()(ListNode *a, ListNode *b) { return a->val > b->val; }
 };
+
 class Solution {
 public:
   ListNode *mergeKLists(vector<ListNode *> &lists) {

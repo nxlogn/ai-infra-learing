@@ -1,5 +1,6 @@
 CompileFlags:
   Compiler: g++
+  CompilationDatabase: 0        # 关闭对 compile_commands.json 的依赖
   Add:
     - --target=x86_64-w64-mingw32
     - --gcc-install-dir=C:/Strawberry/c/lib/gcc/x86_64-w64-mingw32/13.2.0
