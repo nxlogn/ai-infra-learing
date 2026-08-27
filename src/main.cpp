@@ -1,11 +1,12 @@
 #include <iostream>
-#include <random>
 
 using namespace std;
-
+int add(int x, int y);
 int main()
 {
-    cout<<"hello"<<"world";
+    int res = add(3, 4);
+
+    cout<<res<<endl;
 
     return 0;
 }
