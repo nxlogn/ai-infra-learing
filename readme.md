@@ -1,4 +1,4 @@
-![Infra in My Way](https://capsule-render.vercel.app/api?type=waving&color=0:00599C,100:76B900&height=260&section=header&text=Infra in My Way&fontSize=55&fontColor=ffffff&animation=fadeIn)
+![Infra in My Way](https://capsule-render.vercel.app/api?type=waving&color=0:00599C,100:76B900&height=260&section=header&text=Infra%20in%20My%20Way&fontSize=55&fontColor=ffffff&animation=fadeIn)
 
 ![typing](https://readme-typing-svg.demolab.com?font=Fira+Code&weight=600&size=20&pause=1000&color=00599C&center=true&vCenter=true&width=520&lines=%E8%AE%B0%E5%BD%95%E7%AE%97%E6%B3%95%E5%88%B7%E9%A2%98%E4%B8%8E%E5%AD%A6%E4%B9%A0%E7%AC%94%E8%AE%B0;%E5%9D%9A%E6%8C%81%E5%86%99%E9%A2%98+%2F+%E5%9D%9A%E6%8C%81%E8%AE%B0%E7%AC%94%E8%AE%B0;%E6%8C%81%E7%BB%AD%E6%9B%B4%E6%96%B0%E4%B8%AD...)
 
