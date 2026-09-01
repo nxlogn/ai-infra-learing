@@ -4,6 +4,6 @@ using namespace std;
 
 int main()
 {
-    cout<<1+1<<endl;
+    cout<<pow(2.0,3.1);
     return 0;
 }
