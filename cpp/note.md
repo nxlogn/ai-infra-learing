@@ -1651,3 +1651,333 @@ int main() {
 
 # 函数重载
 
+## delete说明符
+
+```cpp
+#include <iostream>
+
+// ── 1. 为什么需要 =delete ─────────────────────────────────────
+//    编译器会做隐式类型提升，把不想要的类型"硬塞"给函数
+//    例如：char → int、bool → int，调用能通过编译但语义可疑
+
+void printInt(int x) {
+    std::cout << x << '\n';
+}
+
+void demo_problem() {
+    printInt(5);     // okay：打印 5
+    printInt('a');   // 打印 97 —— 'a' 被提升为 int，有意义吗？
+    printInt(true);  // 打印 1  —— true 被提升为 int，有意义吗？
+}
+
+// ── 2. =delete 说明符：显式禁止某个重载被调用 ─────────────────
+//    语法：函数声明后加 = delete;
+//    语义：=delete 表示"我禁止这样做"，而不是"这不存在"
+
+void printInt(char) = delete;  // 匹配到它 → 编译错误
+void printInt(bool) = delete;  // 匹配到它 → 编译错误
+
+void demo_delete() {
+    printInt(97);    // okay：精确匹配 printInt(int)
+    // printInt('a');   // ❌ 编译错误：精确匹配到已删除的 printInt(char)
+    // printInt(true);  // ❌ 编译错误：精确匹配到已删除的 printInt(bool)
+}
+
+// ── 3. 关键规则：删除的函数仍参与重载决议 ─────────────────────
+//    ① 删除的重载参与重载决议的所有阶段（不只是精确匹配）
+//    ② 一旦"最佳匹配"是被删除的函数 → 编译错误
+//    ③ 陷阱：printInt(5.0) 会报"不明确的匹配"而不是调用 int 版本
+//       原因：printInt(char) 和 printInt(bool) 都能通过标准转换匹配
+//       double，且都被删除，没有唯一最佳匹配 → 歧义
+
+void demo_deleted_still_in_resolution() {
+    // printInt(5.0);  // ❌ 编译错误：多个可匹配的函数（含被删除的）
+    printInt(6);     // okay：精确匹配 int 版本，无歧义
+}
+
+// ── 4. 进阶：函数模板 + =delete 删除所有不匹配的重载 ───────────
+//    逐个删除 char/bool/double... 太冗长
+//    用一个删除的模板重载兜底：非 int 类型全部精确匹配模板 → 报错
+//    （精确匹配优先于需要提升/转换的 int 版本）
+
+void printIntOnly(int x) {
+    std::cout << x << '\n';
+}
+
+template <typename T>
+void printIntOnly(T x) = delete;  // 匹配除 int 外的所有类型 → 编译错误
+
+void demo_template_delete() {
+    printIntOnly(97);    // okay：精确匹配非模板的 int 版本
+    // printIntOnly('a');   // ❌ 编译错误：匹配到删除的模板
+    // printIntOnly(true);  // ❌ 编译错误：匹配到删除的模板
+}
+
+// ── main ─────────────────────────────────────────────────────
+int main() {
+    demo_problem();
+    demo_delete();
+    demo_deleted_still_in_resolution();
+    demo_template_delete();
+    return 0;
+}
+```
+
+## 默认参数
+
+```cpp
+#include <iostream>
+#include <string>
+
+// ── 1. 默认参数基础 ───────────────────────────────────────────
+//    给参数提供默认值：调用方传值则以传的值为准，未传则用默认值
+//    本质：编译器在调用点把 print(3) 重写为 print(3, 4)
+
+void print(int x, int y = 4) {
+    std::cout << "x: " << x << ", y: " << y << '\n';
+}
+
+void demo_basic() {
+    print(1, 2);  // 显式传值：y 用 2
+    print(3);     // 省略 y：y 用默认值 4
+}
+
+// ── 2. 语法限制：只能用等号 ───────────────────────────────────
+//    默认参数必须用 = 指定，括号或大括号初始化不符合语法
+
+// void foo(int x = 5);    // ✅ ok
+// void goo(int x ( 5 ));  // ❌ 编译错误
+// void boo(int x { 5 });  // ❌ 编译错误
+
+// ── 3. 多个默认参数与"右侧规则" ───────────────────────────────
+//    规则：一旦某参数有默认值，它右边所有参数也必须有默认值
+//    void print(int x = 10, int y);        // ❌ 不允许
+//    也不支持 print(, , 3) 跳过中间参数的调用
+
+void print3(int x = 10, int y = 20, int z = 30) {
+    std::cout << "Values: " << x << ' ' << y << ' ' << z << '\n';
+}
+
+void demo_multi() {
+    print3(1, 2, 3);  // 全部显式传值
+    print3(1, 2);     // z 用默认值 30
+    print3(1);        // y、z 用默认值
+    print3();         // 全部用默认值
+}
+
+// ── 4. 默认参数不能重新声明 ───────────────────────────────────
+//    同一文件中，前向声明和定义不能同时给默认参数
+//    void print(int x, int y = 4);        // 前向声明给了
+//    void print(int x, int y = 4) { }     // ❌ 重定义默认参数
+//    最佳实践：默认参数写在头文件的前向声明中（其他文件可见），
+//    没有前向声明时才写在函数定义里
+
+// ── 5. 默认参数与函数重载：歧义陷阱 ───────────────────────────
+//    带默认参数的重载本身合法，但调用可能不明确
+
+void show(std::string s) { std::cout << "string: " << s << '\n'; }
+void show(char c = ' ')  { std::cout << "char: " << c << '\n'; }
+
+void demo_overload_ok() {
+    show("Hello");  // 解析到 print(std::string)
+    show('a');      // 解析到 print(char)
+    show();         // 相当于 show(' ')，解析到 print(char)
+}
+
+void showNum(int x);
+void showNum(int x, int y = 10);
+void showNum(int x, double y = 20.5);
+// 三个声明能通过编译，但注意调用歧义：
+
+void demo_overload_ambiguity() {
+    showNum(1, 2);     // ✅ 精确解析到 print(int, int)
+    showNum(1, 2.5);   // ✅ 精确解析到 print(int, double)
+    // showNum(1);     // ❌ 编译错误：不明确的调用
+    // 三个候选（含默认参数）都可能匹配，编译器无法选择
+}
+
+// ── main ─────────────────────────────────────────────────────
+int main() {
+    demo_basic();
+    demo_multi();
+    demo_overload_ok();
+    demo_overload_ambiguity();
+    return 0;
+}
+```
+
+## 函数模板
+
+```cpp
+#include <iostream>
+#include <string>
+
+// ── 1. 问题背景：相同实现的重载是维护噩梦 ─────────────────────
+//    max(int,int) 和 max(double,double) 实现完全相同，只有类型不同
+//    每支持一种类型就复制一份 → 违反 DRY 原则
+//    且调用方可能用作者没预料到的类型调用 → 普通函数无解
+
+int maxInt(int x, int y) {
+    return (x < y) ? y : x;
+}
+
+// ── 2. 函数模板：用占位符类型代替具体类型 ─────────────────────
+//    语法：template <typename T> + 函数定义
+//    ① template <typename T> 是模板参数声明，作用域仅限紧随其后的模板
+//    ② typename 和 class 在此处完全等价，推荐 typename
+//    ③ 每个函数模板都需要自己的模板参数声明
+
+template <typename T>
+T maxT(T x, T y) {
+    return (x < y) ? y : x;
+}
+
+// ── 3. 只有模板声明、没有定义 T 会编译失败 ─────────────────────
+//    T max(T x, T y) { ... }   // ❌ 编译错误：T 未定义
+//    这仍然是普通函数，不是函数模板
+
+// ── 4. 模板的使用：编译器按需生成对应类型的函数 ───────────────
+//    调用 maxT(1, 2) 时编译器生成 maxT<int>，
+//    调用 maxT(1.5, 2.5) 时生成 maxT<double>
+//    （具体实例化机制在下一节展开）
+
+void demo_use() {
+    std::cout << maxT(1, 2) << '\n';       // T 推导为 int → 2
+    std::cout << maxT(1.5, 2.5) << '\n';   // T 推导为 double → 2.5
+    std::cout << maxT('a', 'b') << '\n';   // T 推导为 char → b
+    std::cout << maxT(std::string{"abc"}, std::string{"abd"}) << '\n';  // abd
+}
+
+// ── 5. 模板的优势：能和编写时不存在的类型一起工作 ─────────────
+//    模板作者无需预测所有类型，使用时才确定实际类型
+//    标准库（std::max、std::vector 等）大量依赖这一特性
+
+// ── 6. 模板参数命名约定 ──────────────────────────────────────
+//    ① 含义显而易见：单个大写字母 T、U、V
+//    ② 含义不明显：描述性名称，两种风格
+//       Allocator   —— 标准库风格（大写开头）
+//       TAllocator  —— T 前缀风格（一眼看出是模板类型参数）
+
+template <typename U, typename V>
+void printPair(U first, V second) {
+    std::cout << first << ", " << second << '\n';
+}
+
+void demo_naming() {
+    printPair(1, 3.14);            // U=int, V=double
+    printPair("age", 18);          // U=const char*, V=int
+}
+
+// ── 7. 进阶预告：三种模板参数 ─────────────────────────────────
+//    ① 模板类型参数：表示类型（本节，最常用）
+//    ② 模板非类型参数：表示 constexpr 值（数组章节讲）
+//    ③ 模板模板参数：表示模板（后续课程）
+
+// ── main ─────────────────────────────────────────────────────
+int main() {
+    demo_use();
+    demo_naming();
+    return 0;
+}
+```
+
+## 函数模板实例化
+
+```cpp
+#include <iostream>
+#include <string>
+
+// ── 1. 实例化：模板是"函数工厂" ───────────────────────────────
+//    函数模板本身不是函数，其代码不被直接编译执行
+//    它唯一的职责：根据调用生成真正的函数（函数实例）
+//    实例化 = 克隆模板 + 用实际类型替换 T
+//    每个转换单元只在首次调用时实例化，后续调用复用
+
+template <typename T>
+T maxT(T x, T y) {
+    return (x < y) ? y : x;
+}
+
+void demo_instantiate() {
+    std::cout << maxT<int>(1, 2) << '\n';     // 实例化 maxT<int>(int, int)
+    std::cout << maxT<int>(4, 3) << '\n';     // 复用已实例化的 maxT<int>
+    std::cout << maxT<double>(1, 2) << '\n';  // 实例化 maxT<double>(double, double)
+    // maxT<double> 参数是 double，传 int 会隐式转换为 double
+}
+
+// ── 2. 模板参数推导：三种调用语法 ─────────────────────────────
+//    ① maxT<int>(1, 2)  显式指定 T
+//    ② maxT<>(1, 2)     空尖括号：重载决议只考虑模板实例
+//    ③ maxT(1, 2)       普通语法：模板 + 非模板重载都参与决议
+//    最佳实践：用 ③，除非模板版本优于匹配的非模板函数
+
+int maxInt(int x, int y) {              // 与模板同名的非模板函数
+    std::cout << "非模板 max(int, int)\n";
+    return (x < y) ? y : x;
+}
+
+void demo_deduction() {
+    maxT<int>(1, 2);  // 强制走模板
+    maxT<>(1, 2);     // 只考虑模板 → 实例化 maxT<int>
+    maxT(1, 2);       // 优先调用非模板函数 maxInt（更专用）
+}
+
+// ── 3. 混合参数：模板参数 + 普通参数 ──────────────────────────
+//    T 匹配任意类型，double 固定类型（float 会隐式提升）
+
+template <typename T>
+int someFcn(T, double) {
+    return 5;
+}
+
+void demo_mixed() {
+    someFcn(1, 3.4);     // T=int
+    someFcn(1.2, 3.4);   // T=double
+    someFcn(1.2f, 3.4);  // T=float
+}
+
+// ── 4. 语义陷阱：编译器只查语法，不查语义 ─────────────────────
+//    实例化后的函数只要语法有效就能编译，语义是否合理是调用者的责任
+
+template <typename T>
+T addOne(T x) {
+    return x + 1;
+}
+
+void demo_semantic_trap() {
+    std::cout << addOne(1) << '\n';      // 2
+    std::cout << addOne(2.3) << '\n';    // 3.3
+    // std::string s{"hi"};
+    // addOne(s);                        // ❌ 编译错误：string + 1 无意义（好在报错了）
+    // std::cout << addOne("Hello") << '\n';  // ⚠️ 能编译！指针+1 → "ello"
+    // 解法：模板特化 + =delete 封死语义不合理的类型
+}
+
+template <>
+const char* addOne(const char* x) = delete;  // 禁止 const char* 实例化
+
+// ── 5. 多文件规则：模板定义必须放头文件 ───────────────────────
+//    编译器实例化时必须看到完整模板定义
+//    定义放 .cpp → 调用方无法实例化 → 链接错误 LNK2019
+//    放 .h 则不违反 ODR：模板定义允许多处相同定义，
+//    且隐式实例化的函数是隐式 inline 的
+
+// add.h:
+//   template <typename T> T addOne(T x) { return x + 1; }
+// main.cpp:
+//   #include "add.h"   // 编译器看到定义，才能按需实例化
+
+// ── 6. 泛型编程 ──────────────────────────────────────────────
+//    模板类型 = 泛型类型；用模板编程 = 泛型编程
+//    专注算法逻辑与数据结构设计，不受具体类型束缚
+
+// ── main ─────────────────────────────────────────────────────
+int main() {
+    demo_instantiate();
+    demo_deduction();
+    demo_mixed();
+    demo_semantic_trap();
+    return 0;
+}
+```
+
