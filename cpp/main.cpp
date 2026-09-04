@@ -1,9 +1,10 @@
-#include <bits/stdc++.h>
+#include <iostream>
+#include <cmath>
+#include <cassert>
 
 using namespace std;
 
-int main()
-{
-    cout<<pow(2.0,3.1);
+int main() {
+    cout << 4.0 / 3;
     return 0;
 }
