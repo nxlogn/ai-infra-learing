@@ -1981,3 +1981,850 @@ int main() {
 }
 ```
 
+# 复合类型，引用与指针
+
+## 左值和右值
+
+```cpp
+// 值类别（左值 lvalue 与右值 rvalue）
+#include <iostream>
+
+// ── 1. 表达式的两个属性 ─────────────────────────────────────
+//    每个表达式都有：类型 + 值类别
+//    类型：编译时必须可确定（类型检查 / auto 推导的依据）
+//    值：可在编译时（constexpr）或运行时确定
+//    值类别：指示表达式解析为值、函数还是对象
+
+void demo_expr_type() {
+    auto v1{ 12 / 4 };    // int / int   → v1 是 int
+    auto v2{ 12.0 / 4 };  // double/int  → v2 是 double（int 被转成 double）
+}
+
+// ── 2. 左值 lvalue ──────────────────────────────────────────
+//    求值为"可识别的对象或函数"的表达式
+//    有标识 → 可通过地址区分，生存期超过单个表达式
+//    分两类：可修改左值 / 不可修改左值（const、constexpr）
+
+void demo_lvalue() {
+    int x{ 5 };
+    int y{ x };              // x 是可修改左值
+    const double d{ 1.2 };
+    const double e{ d };     // d 是不可修改左值
+    &x;                      // 取地址 OK → 左值铁证
+}
+
+// ── 3. 右值 rvalue ──────────────────────────────────────────
+//    "不是左值的表达式"，求值为一个值
+//    常见右值：字面值（C 字符串字面值除外！）、按值返回的
+//    函数调用、运算符结果、static_cast 结果
+//    特点：不可识别（临时值），必须立即使用，表达式结束即丢弃
+
+int return5() { return 5; }
+
+void demo_rvalue() {
+    int a{ 5 };               // 5 是右值
+    int z{ return5() };       // 按值返回的调用是右值
+    int w{ a + 1 };           // 运算符结果是右值
+    // &5;                    // ❌ 编译错误：5 是右值，不能取地址
+    // &return5();            // ❌ 编译错误：return5() 是右值
+}
+
+// ── 4. 特例：C 风格字符串字面值是左值 ───────────────────────
+//    "..." 本质是 C 风格数组，可退化为指针，为向后兼容
+//    因此它是左值（但不可修改）
+
+void demo_string_literal() {
+    const char* p{ "Hello" }; // "Hello" 是左值，可取地址
+    // p[0] = 'h';            // ❌ 但它是 const 数组，不可修改
+}
+
+// ── 5. 赋值的规则 ───────────────────────────────────────────
+//    赋值要求：左操作数是可修改左值，右操作数是右值
+//    所以 x = 5 合法，5 = x 非法
+
+void demo_assign() {
+    int x{};
+    x = 5;                    // ✅ x 是可修改左值，5 是右值
+    // 5 = x;                 // ❌ 编译错误：5 不是左值
+}
+
+// ── 6. 左值到右值的转换 ─────────────────────────────────────
+//    期望右值的上下文若给了左值，会隐式转换为它存储的值
+//    所以 x = y 中 y（左值）被转成值 2 后赋给 x
+//    x = x + 1：左边 x 是左值，右边 x + 1 里 x 被转成右值
+
+void demo_conversion() {
+    int x{ 1 };
+    int y{ 2 };
+    x = y;                    // y 经左值→右值转换，取其值 2
+    x = x + 1;                // 同一变量，左右两侧扮演不同角色
+    std::cout << x << '\n';   // 输出 3
+}
+
+// ── 7. 判别技巧 ─────────────────────────────────────────────
+//    拿不准时写 "&表达式;"：能编译通过的一定是左值
+//    经验法则：
+//    ① 左值：求值为变量等可识别对象，表达式结束后仍存在
+//    ② 右值：求值为函数/运算符返回的值，表达式结束后丢弃
+//    （C++11 为移动语义又加了 glvalue/prvalue/xvalue，后面再学）
+
+// ── main ────────────────────────────────────────────────────
+int main() {
+    demo_expr_type();
+    demo_lvalue();
+    demo_rvalue();
+    demo_string_literal();
+    demo_assign();
+    demo_conversion();
+    return 0;
+}
+```
+
+## 左值引用
+
+```cpp
+// 左值引用（lvalue reference）
+#include <iostream>
+
+// ── 1. 引用是对象的别名 ─────────────────────────────────────
+//    对引用的操作全部作用于被引用对象
+//    引用本质上与被引用的对象相同
+
+void demo_alias() {
+    int x{ 5 };
+    int& ref{ x };            // ref 是 x 的别名
+    std::cout << x << ' ' << ref << '\n';  // 输出 5 5
+}
+
+// ── 2. 通过引用读和写 ───────────────────────────────────────
+//    ref 改 → x 也变；x 改 → ref 也变（因为是同一个东西）
+
+void demo_modify() {
+    int x{ 5 };
+    int& ref{ x };
+    x = 6;
+    std::cout << ref << '\n'; // 6（x 改了，ref 跟着变）
+    ref = 7;
+    std::cout << x << '\n';   // 7（ref 改了，x 跟着变）
+}
+
+// ── 3. 引用必须初始化，且只能绑定可修改左值 ─────────────────
+//    绑定过程叫"引用绑定"；左值引用 = 非常量左值引用
+
+void demo_bind() {
+    int x{ 5 };
+    const int y{ 5 };
+    int& ref{ x };            // ✅ 绑定可修改左值
+    // int& invalidRef;       // ❌ 编译错误：引用必须初始化
+    // int& bad1{ y };        // ❌ 编译错误：不能绑定 const 左值
+    // int& bad2{ 0 };        // ❌ 编译错误：不能绑定右值
+    // int& bad3{ 3.14 };     // ❌ 编译错误：类型必须匹配
+}
+
+// ── 4. 引用无法重置（经典陷阱！）────────────────────────────
+//    初始化后永远指向原对象
+//    ref = y 不是"改绑到 y"，而是等价于 x = y
+
+void demo_no_rebind() {
+    int x{ 5 };
+    int y{ 6 };
+    int& ref{ x };
+    ref = y;                  // 意图：让 ref 改绑 y？
+    std::cout << x << '\n';   // 实际输出 6！x 被赋成了 y 的值
+}
+
+// ── 5. 作用域与独立的生命周期 ───────────────────────────────
+//    引用作用域同普通变量；引用与被引用对象生命周期独立
+//    引用先销毁 → 对象无恙
+//    对象先销毁 → 引用变成"悬空引用"，访问是未定义行为！
+
+void demo_lifetime() {
+    int x{ 5 };
+    {
+        int& ref{ x };        // ref 是 x 的引用
+        std::cout << ref << '\n';
+    }                         // ref 在这里销毁，x 不受影响
+    std::cout << x << '\n';   // x 还是 5
+}
+
+// ── 6. 引用不是对象 ─────────────────────────────────────────
+//    引用不需要占存储（编译器会优化掉）
+//    不能引用引用：用引用初始化引用，只是绑定到原对象
+//    int&& 不是"引用的引用"，C++11 里是右值引用语法
+
+void demo_not_object() {
+    int var{};
+    int& ref1{ var };
+    int& ref2{ ref1 };        // 不是引用的引用！ref2 绑定到 var
+    ref2 = 42;
+    std::cout << var << '\n'; // 42
+    // 需要可重置的引用 → std::reference_wrapper（后续介绍）
+}
+
+// ── main ────────────────────────────────────────────────────
+int main() {
+    demo_alias();
+    demo_modify();
+    demo_bind();
+    demo_no_rebind();
+    demo_lifetime();
+    demo_not_object();
+    return 0;
+}
+```
+
+## 常量的左值引用
+
+```cpp
+// 对常量的左值引用（const lvalue reference）
+#include <iostream>
+
+// ── 1. 常量引用：把被引用对象视为 const ─────────────────────
+//    普通 int& 不能绑 const 变量（否则可借引用改常量）
+//    const int& 可以，且不能通过它修改对象
+
+void demo_const_ref() {
+    const int x{ 5 };
+    const int& ref{ x };      // ✅ 常量引用绑定 const 左值
+    std::cout << ref << '\n'; // 可以读
+    // ref = 6;               // ❌ 编译错误：不能通过常量引用修改
+}
+
+// ── 2. 绑定可修改左值：仅引用视角受限 ───────────────────────
+//    通过 ref 不能改，但通过原标识符 x 仍可改
+//    const 限制的是引用，不是底层对象
+
+void demo_bind_modifiable() {
+    int x{ 5 };
+    const int& ref{ x };
+    std::cout << ref << '\n';
+    // ref = 7;               // ❌ 编译错误：ref 是常量视角
+    x = 6;                    // ✅ 直接改 x 没问题
+    std::cout << ref << '\n'; // 6（ref 看到的是新值）
+}
+
+// ── 3. 常量引用可以绑定右值！────────────────────────────────
+//    会创建临时对象，常量引用绑定到该临时对象
+//    普通左值引用做不到这一点
+
+void demo_bind_rvalue() {
+    const int& ref{ 5 };      // ✅ 5 是右值，创建临时对象绑定
+    std::cout << ref << '\n'; // 输出 5
+}
+
+// ── 4. 生命周期扩展 ─────────────────────────────────────────
+//    临时对象本该在表达式末尾销毁 → ref 会悬空
+//    特殊规则：常量引用直接绑定临时对象时，
+//    临时对象生命周期延长到与引用一致 → 安全
+//    ⚠️ 仅限"直接绑定"；函数返回的临时对象不适用此规则
+
+// ── 5. 三种绑定能力对比（常量引用更灵活）────────────────────
+//                 int&        const int&
+//    可修改左值    ✅ 读写      ✅ 只读
+//    const 左值    ❌           ✅ 只读
+//    右值          ❌           ✅（绑临时对象）
+//    最佳实践：尽量用常量引用，除非需要修改被引用对象
+
+void demo_compare() {
+    int x{ 5 };
+    const int y{ 5 };
+    int& r1{ x };             // ✅
+    // int& r2{ y };          // ❌
+    // int& r3{ 5 };          // ❌
+    const int& c1{ x };       // ✅
+    const int& c2{ y };       // ✅
+    const int& c3{ 5 };       // ✅
+    std::cout << r1 + c1 + c2 + c3 << '\n';  // 5+5+5+5=20
+}
+
+// ── 6. constexpr 引用（选读）────────────────────────────────
+//    constexpr 引用只能绑定静态存储期对象（全局 / static 局部）
+//    因为地址必须是编译期常量；不能绑普通局部变量
+//    引用 const 对象时需同时写 constexpr 和 const
+
+int g_x{ 5 };
+
+void demo_constexpr_ref() {
+    constexpr int& ref1{ g_x };            // ✅ 全局变量
+    static int s_x{ 6 };
+    constexpr int& ref2{ s_x };            // ✅ 静态局部变量
+    static const int s_y{ 6 };
+    constexpr const int& ref3{ s_y };      // const 对象要加 const
+    int x{ 6 };
+    // constexpr int& ref4{ x };           // ❌ 不能绑非静态局部变量
+    std::cout << ref1 + ref2 + ref3 << '\n';  // 17
+}
+
+// ── main ────────────────────────────────────────────────────
+int main() {
+    demo_const_ref();
+    demo_bind_modifiable();
+    demo_bind_rvalue();
+    demo_compare();
+    demo_constexpr_ref();
+    return 0;
+}
+```
+
+## 指针
+
+```cpp
+// 指针简介（pointer）
+#include <iostream>
+#include <typeinfo>
+
+// ── 1. 取地址 & 与解引用 * ──────────────────────────────────
+//    & 拿到对象的内存地址；* 访问地址处的值（返回左值）
+//    两者互为逆操作：& 取对象的地址，* 取地址处的对象
+
+void demo_addr_deref() {
+    int x{ 5 };
+    std::cout << x << '\n';       // 5：变量的值
+    std::cout << &x << '\n';      // 十六进制地址
+    std::cout << *(&x) << '\n';   // 5：地址处的值（= x）
+}
+
+// ── 2. & 和 * 的一词多义（靠上下文区分）─────────────────────
+//    int& ref  → 左值引用（类型后）
+//    &x        → 取地址（一元）
+//    x & y     → 按位 AND（二元）
+//    *ptr      → 解引用（一元）
+//    x * y     → 乘法（二元）
+
+void demo_ambiguity() {
+    int x{ 6 }, y{ 3 };
+    int& ref{ x };
+    std::cout << (x & y) << '\n'; // 2：按位 AND
+    std::cout << x * y << '\n';   // 18：乘法
+    std::cout << ref << '\n';     // 6：引用
+}
+
+// ── 3. 指针：保存内存地址的对象 ─────────────────────────────
+//    int* 是"指向 int 的指针"；星号贴类型名（最佳实践）
+//    必须初始化（否则是野指针，解引用 = 未定义行为）
+//    &x 的返回值本身就是 int* 类型
+
+void demo_pointer_basic() {
+    int x{ 5 };
+    int* ptr{ &x };           // ptr 保存 x 的地址，"指向" x
+    std::cout << *ptr << '\n';// 5：解引用取值
+    std::cout << typeid(&x).name() << '\n';  // &x 的类型是 int*
+    int* ptr2{};              // 空指针（好习惯）
+    // int* ptr3{ 5 };        // ❌ 编译错误：不能用字面值初始化指针
+}
+
+// ── 4. 指针的两种赋值（重点！）──────────────────────────────
+//    ptr = &y  → 改指向（ptr 换了地址）
+//    *ptr = 6  → 改所指对象的值（x 被修改）
+
+void demo_assign() {
+    int x{ 5 };
+    int y{ 6 };
+    int* ptr{ &x };
+    std::cout << *ptr << '\n';// 5
+    ptr = &y;                 // 改指向 → 现在指向 y
+    std::cout << *ptr << '\n';// 6
+    *ptr = 7;                 // 解引用赋值 → y 变成 7
+    std::cout << y << '\n';   // 7
+}
+
+// ── 5. 指针 vs 引用 ─────────────────────────────────────────
+//    相同：都能间接访问/修改另一个对象
+//    区别：
+//    ① 引用取地址/解引用是隐式的，指针是显式的（&x / *ptr）
+//    ② 引用必须初始化，指针不必（但有野指针风险）
+//    ③ 引用不是对象，指针是（占存储）
+//    ④ 引用不能改绑，指针可以换指向
+//    ⑤ 引用必须绑对象，指针可以为空
+//    ⑥ 引用安全，指针危险
+
+void demo_vs_ref() {
+    int x{ 5 };
+    int& ref{ x };            // 隐式：直接当 x 用
+    int* ptr{ &x };           // 显式：&x 取地址
+    std::cout << ref << ' ' << *ptr << '\n';  // 5 5
+}
+
+// ── 6. 指针的大小与悬空指针 ─────────────────────────────────
+//    大小与所指类型无关：32 位程序 4 字节，64 位 8 字节
+//    悬空指针：保存已销毁对象的地址
+//    解引用悬空指针 → 未定义行为
+//    （但给悬空指针赋新值如 nullptr 是允许的）
+
+void demo_dangling() {
+    int x{ 5 };
+    int* ptr{ &x };
+    std::cout << *ptr << '\n';   // 有效
+    {
+        int y{ 6 };
+        ptr = &y;
+        std::cout << *ptr << '\n';   // 有效
+    }                             // y 销毁，ptr 悬空！
+    // std::cout << *ptr << '\n'; // ❌ 未定义行为
+    ptr = nullptr;                // ✅ 赋新值是允许的
+}
+
+// ── main ────────────────────────────────────────────────────
+int main() {
+    demo_addr_deref();
+    demo_ambiguity();
+    demo_pointer_basic();
+    demo_assign();
+    demo_vs_ref();
+    demo_dangling();
+    return 0;
+}
+```
+
+## 指针与常量
+
+```cpp
+// 指针与常量（pointer and const）
+#include <iostream>
+
+// ── 1. 普通指针不能指向 const 变量 ──────────────────────────
+//    否则能通过指针修改常量，违反常量性
+
+void demo_normal_limit() {
+    const int x{ 5 };
+    // int* ptr{ &x };         // ❌ 编译错误：const int* 不能转 int*
+}
+
+// ── 2. 指向常量的指针：const int* ───────────────────────────
+//    const 在 * 左边 → 修饰所指向的值
+//    不能通过指针改值，但可以换指向
+//    可指向 const 或非常量变量（只读视角，同 const 引用）
+
+void demo_ptr_to_const() {
+    const int x{ 5 };
+    const int y{ 6 };
+    const int* ptr{ &x };     // 指向 const int
+    // *ptr = 6;              // ❌ 编译错误：不能通过指针改常量
+    ptr = &y;                 // ✅ 可以换指向
+    std::cout << *ptr << '\n';// 6
+
+    int v{ 5 };               // 非常量变量
+    const int* p{ &v };       // 指向常量的指针也能指向它
+    // *p = 6;                // ❌ 只读视角，不能改
+    v = 6;                    // ✅ 但通过原标识符可以改
+}
+
+// ── 3. 指针常量：int* const ─────────────────────────────────
+//    const 在 * 右边 → 修饰指针本身
+//    必须初始化（同 const 变量），地址永远不变
+//    但可以解引用修改所指向的值
+
+void demo_const_ptr() {
+    int x{ 5 };
+    int y{ 6 };
+    int* const ptr{ &x };     // ptr 永远指向 x
+    // ptr = &y;              // ❌ 编译错误：指针常量不能换指向
+    *ptr = 6;                 // ✅ 可以改所指向的值
+    std::cout << x << '\n';   // 6
+}
+
+// ── 4. 指向常量的指针常量：const int* const ─────────────────
+//    双 const：地址不能变，值也不能通过指针改
+//    只能读；不能指向右值（右值没有地址）
+
+void demo_both_const() {
+    int value{ 5 };
+    const int* const ptr{ &value };
+    // ptr = nullptr;         // ❌ 不能换地址
+    // *ptr = 6;              // ❌ 不能改值
+    std::cout << *ptr << '\n';// 只能读：5
+}
+
+// ── 5. 四种组合总结表 ───────────────────────────────────────
+//    int*                  改指向 ✅   改值 ✅
+//    const int*            改指向 ✅   改值 ❌
+//    int* const            改指向 ❌   改值 ✅
+//    const int* const      改指向 ❌   改值 ❌
+//    口诀：const 在 * 左 → 修饰值；const 在 * 右 → 修饰指针
+
+void demo_summary() {
+    int v{ 5 };
+    int* ptr0{ &v };                   // 普通指针
+    const int* ptr1{ &v };             // 指向常量
+    int* const ptr2{ &v };             // 指针常量
+    const int* const ptr3{ &v };       // 双 const
+    *ptr0 = 1; *ptr2 = 2;              // 这两个能改值
+    std::cout << *ptr1 << *ptr3 << v << '\n';
+}
+
+// ── main ────────────────────────────────────────────────────
+int main() {
+    demo_normal_limit();
+    demo_ptr_to_const();
+    demo_const_ptr();
+    demo_both_const();
+    demo_summary();
+    return 0;
+}
+```
+
+## 按指针传递参数
+
+```cpp
+// 通过指针传递函数参数（按地址传递）
+#include <iostream>
+#include <cassert>
+#include <string>
+
+// ── 1. 三种传参方式 ─────────────────────────────────────────
+//    按值：拷贝对象，成本高，改副本
+//    按引用：别名绑原对象，零拷贝
+//    按地址：拷贝的是地址（4/8 字节，很快），解引用访问原对象
+
+void printByValue(std::string val) {
+    std::cout << val << '\n';       // 打印副本
+}
+
+void printByReference(const std::string& ref) {
+    std::cout << ref << '\n';       // 无拷贝
+}
+
+void printByAddress(const std::string* ptr) {
+    std::cout << *ptr << '\n';      // 解指针访问原对象，无拷贝
+}
+
+void demo_three_ways() {
+    std::string str{ "Hello, world!" };
+    printByValue(str);              // 拷贝
+    printByReference(str);          // 引用
+    printByAddress(&str);           // 传地址（&str）
+}
+
+// ── 2. 按地址传参允许修改实参 ───────────────────────────────
+//    非常量指针参数：解引用赋值直接改原对象
+//    只读则用指向常量的指针 const int*
+
+void changeValue(int* ptr) {
+    *ptr = 6;                       // 修改的是原对象
+}
+
+void demo_modify() {
+    int x{ 5 };
+    changeValue(&x);
+    std::cout << x << '\n';         // 6，修改持续生效
+}
+
+// ── 3. 空指针检查（按地址传参的必修课）──────────────────────
+//    调用方可能传入空指针 → 解引用 = 未定义行为
+//    风格①：if (ptr) { ... }  正常逻辑嵌套在 if 内
+//    风格②：if (!ptr) return; 快速返回，逻辑平铺（推荐）
+//    空指针属"不应发生"时：assert(ptr) 文档化
+
+void printSafe(const int* ptr) {
+    assert(ptr);                    // 调试期捕获违规调用
+    if (!ptr) return;               // 快速返回，防崩溃
+    std::cout << *ptr << '\n';
+}
+
+void demo_null_check() {
+    int x{ 5 };
+    printSafe(&x);                  // 5
+    printSafe(nullptr);             // 安全返回，不崩溃
+}
+
+// ── 4. 按地址 vs 按引用 ─────────────────────────────────────
+//    按地址的劣势：
+//    ① 只能传左值（&5 非法，右值无地址）
+//    ② & 和 * 语法噪音
+//    ③ 有解引用空指针的风险
+//    const 引用可接受左值和右值，语法自然
+
+void printByConstRef(const int& ref) {
+    std::cout << ref << '\n';
+}
+
+void demo_ref_vs_addr() {
+    printByConstRef(5);             // ✅ 常量引用能接右值
+    // printByAddress(&5);          // ❌ 无法取右值的地址
+}
+
+// ── 5. 格言与最佳实践 ───────────────────────────────────────
+//    "可以时通过引用传递参数，必须时才通过地址传递参数"
+//    除非有特定理由（如需要判空语义、操作裸内存），首选引用
+
+// ── main ────────────────────────────────────────────────────
+int main() {
+    demo_three_ways();
+    demo_modify();
+    demo_null_check();
+    demo_ref_vs_addr();
+    return 0;
+}
+```
+
+# 枚举与结构体
+
+## 非限定作用域枚举
+
+```cpp
+// ## 非限定作用域枚举
+#include <iostream>
+
+// ── 1. 从魔数到枚举 ──────────────────────────────────────
+// 反面教材：int appleColor{0};  → 魔数，不直观
+// 反面教材：constexpr int red{0}; + using Color=int; → 仍是 int，
+//   Color eyeColor{8}; 语法正确但语义无意义，编译器无法拦截
+// 枚举：值被限制在一组命名符号常量中，写错即编译错误
+enum Color {
+    red,       // 枚举元素隐式为 constexpr
+    green,
+    blue,      // 尾随逗号可选，推荐保留
+};  // ❗ 枚举定义必须以分号结尾
+
+// ── 2. 类型安全：初始值必须是已定义的枚举元素 ────────────
+void demo_type_safety() {
+    Color apple { red };    // ✅
+    Color shirt { green };  // ✅
+
+    // Color socks { white };  // ❌ 编译错误：white 不是 Color 的元素
+    // Color hat   { 2 };      // ❌ 编译错误：2 不是 Color 的元素
+    (void)apple; (void)shirt;
+}
+
+// ── 3. 不同枚举是不同的类型 ──────────────────────────────
+// 每个 enum 都是独立类型（不同于类型别名与原类型视为相同）
+enum Pet { cat, dog, pig, whale, };
+
+void demo_distinct() {
+    Pet myPet { dog };     // ✅
+    // Pet other { blue };  // ❌ 编译错误：blue 不是 Pet 的元素
+    (void)myPet;
+}
+
+// ── 4. 核心缺陷：元素泄漏到枚举所在作用域 ────────────────
+// "非限定作用域"：元素名进入与枚举定义相同的作用域，不创建新作用域
+// enum Feeling { happy, tired, blue, };  // ❌ blue 与 Color::blue 全局冲突
+// 缓解方案：放进 namespace 提供独立作用域
+namespace Feeling {
+    enum Feeling {
+        happy,
+        tired,
+        blue,  // Feeling::blue 不与 Color::blue 冲突
+    };
+}
+
+// ── 5. 命名惯例 ──────────────────────────────────────────
+// 枚举类型名大写开头；枚举元素小写开头
+// ❌ 避免全大写（易与预处理宏冲突）、避免大写开头（易与类型名混淆）
+
+// ── 6. 典型用法：状态码返回值（替代魔数 -1/-2/-3）───────
+enum FileReadResult {
+    readResultSuccess,
+    readResultErrorFileOpen,
+    readResultErrorFileRead,
+    readResultErrorFileParse,
+};
+
+FileReadResult readFileContents() {
+    return readResultSuccess;  // 示例省略文件操作
+}
+
+// 枚举小、拷贝便宜，按值传递/返回即可
+void demo_status() {
+    if (readFileContents() == readResultSuccess)  // 可用 == / != 比较
+        std::cout << "读取成功\n";
+}
+
+// ── 7. 典型用法：函数选项参数（配 switch）────────────────
+enum SortOrder { alphabetical, alphabeticalReverse, numerical, };
+
+void sortData(SortOrder order) {
+    switch (order) {
+    case alphabetical:         std::cout << "字母序排序\n"; break;
+    case alphabeticalReverse:  std::cout << "字母逆序排序\n"; break;
+    case numerical:            std::cout << "数值序排序\n"; break;
+    }
+}
+
+// ── main ─────────────────────────────────────────────────
+int main() {
+    demo_type_safety();
+    demo_distinct();
+
+    Color raspberry { Color::red };       // 非限定枚举元素也可加作用域访问
+    std::cout << "raspberry = red\n";
+
+    Feeling::Feeling me { Feeling::blue }; // 必须以命名空间为前缀
+    std::cout << "I'm feeling blue\n";
+
+    demo_status();
+    sortData(numerical);
+    return 0;
+}
+```
+
+# class
+
+## class简介
+
+```cpp
+// ## class 简介（类不变量的引入）
+// 注：本卡片在 C++17 下编译
+#include <cassert>
+#include <iostream>
+
+// ── 1. 没有不变量的 struct：成员彼此独立，怎么用都行 ─────
+struct Date {
+    int day {};
+    int month {};
+    int year {};
+};
+
+void printDate(const Date& date) {
+    std::cout << date.day << '/' << date.month << '/' << date.year << '\n';
+}
+
+// ── 2. 类不变量：对象整个生存期内必须为真的条件 ─────────
+// Fraction 的不变量：denominator 不能为 0（除 0 数学上未定义）
+// 违反不变量 → 对象处于无效状态 → 后续使用可能是 UB
+struct Fraction {
+    int numerator { 0 };
+    int denominator { 1 };  // 默认成员初始值：值初始化时保证有效（软防御）
+};
+
+void printFractionValue(const Fraction& f) {
+    // 软防御：assert 只在出错时报警，不能"避免出错"
+    assert(f.denominator != 0);
+    std::cout << f.numerator / f.denominator << '\n';
+}
+
+void demo_invariant_violation() {
+    Fraction good { 5, 2 };   // ✅ 有效状态
+    printFractionValue(good);
+
+    // Fraction bad { 5, 0 };   // ❌ 聚合初始化可以显式破坏不变量！
+    // printFractionValue(bad); // 除零错误，程序终止
+    // struct 没有任何机制阻止上面两行 —— 这正是 class 要解决的问题
+}
+
+// ── 3. 更复杂的跨成员不变量：成员联动靠人肉维护 ─────────
+// struct Employee {
+//     std::string name {};
+//     char firstInitial {};  // 不变量：必须等于 name 首字母（或 '0'）
+// };
+// 改 name 必须同步改 firstInitial，靠开发者自觉 → 迟早出错
+
+// ── 4. class 的目标 ──────────────────────────────────────
+// 提供机制让对象"要么无法进入无效状态，要么立即报错"
+// （而不是让 UB 在未来某个随机时刻爆发）
+
+// ── 5. class 与 struct 技术上几乎相同 ────────────────────
+class Date2 {
+public:              // 访问说明符：使成员可被外部访问
+    int m_day {};    // 成员变量惯用 m_ 前缀（原因后续课程讲）
+    int m_month {};
+    int m_year {};
+};
+
+void demo_class_same_as_struct() {
+    Date2 date { 4, 10, 21 };  // 公有成员、无构造函数的 class 仍是聚合
+    printDate(Date{ date.m_day, date.m_month, date.m_year });
+    // 关键点：struct 与 class 可互相实现对方的功能，
+    // 差别在于"使用方式"（访问控制、成员函数、封装），后续展开
+}
+
+// ── 6. 标准库大多数类型都是 class ────────────────────────
+// std::string、std::string_view 等都是 class
+// C++ 最初的名字："带类的C（C with Classes）"
+void demo_std_is_class() {
+    std::string s { "class 的实例" };  // 你早就在用类了
+    std::cout << s << '\n';
+}
+
+// ── main ─────────────────────────────────────────────────
+int main() {
+    printDate({ 4, 10, 21 });
+    demo_invariant_violation();
+    demo_class_same_as_struct();
+    demo_std_is_class();
+    return 0;
+}
+```
+
+## 访问说明符
+
+```cpp
+// ## 公共和私有成员以及访问说明符
+#include <iostream>
+#include <string>
+#include <string_view>
+
+// ── 1. 默认访问级别：struct 是 public，class 是 private ──
+struct DateS {           // struct 默认全 public
+    int year {};
+    int day {};
+};
+
+class DateC {            // class 默认全 private
+    int m_year {};       // m_ 前缀：区分成员与参数/局部变量
+    int m_day {};        // 并避免与参数同名冲突（参数会遮蔽成员）
+};
+
+// ── 2. 私有成员 → 非聚合 → 聚合初始化失效 ────────────────
+void demo_aggregate_loss() {
+    DateS s { 2020, 14 };   // ✅ struct 是聚合，可聚合初始化
+    // DateC c { 2020, 14 };  // ❌ 编译错误：有私有成员，非聚合
+    (void)s;
+}
+
+// ── 3. class 的正确姿势：成员变量私有 + 成员函数公共 ─────
+class Person {
+    std::string m_name {};     // 私有：外部无法直接访问
+
+public:                        // 访问说明符：其后所有成员直到下一个说明符
+    void setName(std::string_view name) {
+        m_name = name;         // m_ 前缀一眼看出改的是对象状态
+    }
+
+    void kisses(const Person& p) const {
+        // 访问级别"按类"而非"按对象"：
+        // p 是别的对象，但同类成员函数可以直接访问其私有成员
+        std::cout << m_name << " kisses " << p.m_name << '\n';
+    }
+};
+
+void demo_class_usage() {
+    Person joe;
+    joe.setName("Joe");        // 外部只能通过公共接口操作对象
+    Person kate;
+    kate.setName("Kate");
+    joe.kisses(kate);
+
+    // joe.m_name = "x";       // ❌ 编译错误：m_name 是 private
+}
+
+// ── 4. 访问级别摘要 ──────────────────────────────────────
+//           本类成员   子类    外部 public
+// public:      ✅       ✅        ✅
+// protected:   ✅       ✅        ❌
+// private:     ✅       ❌        ❌
+// 说明符可乱序、可重复；class 省略开头 private: 合法但建议显式写出
+
+// ── 5. struct vs class 使用准则（经验法则）───────────────
+// 用 struct：简单数据集合 + 聚合初始化够用 + 无不变量/限制/清理
+// 用 class：其他一切情况（成员变量私有、成员函数公共）
+// 技术 diff 唯一重要点：默认访问级别（struct→public, class→private）
+struct Config {   // ✅ 适合 struct：constexpr 全局数据、返回多值的载体
+    int width {};
+    int height {};
+};
+
+// ── main ─────────────────────────────────────────────────
+int main() {
+    DateS today { 2020, 14 };
+    std::cout << today.year << '\n';
+
+    demo_aggregate_loss();
+    demo_class_usage();
+
+    Config cfg { 800, 600 };
+    std::cout << cfg.width << 'x' << cfg.height << '\n';
+    return 0;
+}
+```
+

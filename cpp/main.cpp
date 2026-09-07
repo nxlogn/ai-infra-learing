@@ -1,10 +1,10 @@
 #include <iostream>
-#include <cmath>
-#include <cassert>
 
 using namespace std;
 
 int main() {
-    cout << 4.0 / 3;
+    int x{5};
+    int& ref{x};
+    cout<<static_cast<bool>(ref == x);
     return 0;
 }
