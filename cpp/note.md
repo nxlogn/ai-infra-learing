@@ -2828,3 +2828,1035 @@ int main() {
 }
 ```
 
+## 访问函数
+
+当数据成员是 **private** 时，外部代码无法直接读写它们，那怎么合理地读取/修改这些值？答案是 **访问函数（access functions）**——普通的 public 成员函数，专门用于检索或更改私有成员。
+
+
+
+**1. 两种访问函数**
+
+- **Getter**（访问器）：返回私有成员的值，通常声明为 `const`（这样 const 和非 const 对象都能调用）
+- **Setter**（修改器）：设置私有成员的值，必须是非 `const`（因为要修改成员）
+
+**2. 命名约定（三种主流风格）**
+
+- `getDay() / setDay()` —— 前缀 get/set，语义清晰，表明调用成本低
+- `day() / day(int)` —— 无前缀，靠重载区分，标准库风格，但 `d.day(5)` 不够直观
+- `day() / setDay()` —— 折中方案
+- **最佳实践**：setter 强烈建议用 `set` 前缀（语义上明确"会改变对象状态"）；getter 可加可不加
+
+**3. `m_` 前缀的一个重要作用**
+C++ 不允许数据成员和 getter 同名（Java 可以），`m_` 前缀正好避免了命名冲突。
+
+**4. Getter 的返回方式**
+
+- 拷贝成本低 → **按值返回**
+- 拷贝成本高（如大对象）→ **按 const 左值引用返回**（下一节展开）
+
+**5. 务实的设计建议**（重点，面试/工程常用）
+
+- 类没有不变量、又需要大量访问函数 → 干脆用 **struct**，直接暴露成员
+- 优先实现**行为/操作**而非访问函数：比如不写 `setAlive(bool)`，而写 `kill()` 和 `revive()`
+- 仅在公共接口确实需要时才提供 getter/setter
+
+
+
+```cpp
+// ── 1. 访问函数基础：getter 与 setter ──────────────────────
+// 访问函数 = 检索/修改私有成员的普通 public 成员函数
+// getter 通常 const（const 对象也能调用）；setter 必须非 const
+#include <iostream>
+
+class Date {
+private:
+    int m_year{ 2020 };   // m_ 前缀：避免与 getter 同名（C++ 不允许同名）
+    int m_month{ 10 };
+    int m_day{ 14 };
+
+public:
+    void print() const
+    {
+        std::cout << m_year << '/' << m_month << '/' << m_day << '\n';
+    }
+
+    int getYear() const { return m_year; }        // getter：const
+    void setYear(int year) { m_year = year; }     // setter：非 const
+
+    int getMonth() const { return m_month; }
+    void setMonth(int month) { m_month = month; }
+
+    int getDay() const { return m_day; }
+    void setDay(int day) { m_day = day; }
+};
+
+void demo_basic()
+{
+    Date d{};
+    d.setYear(2021);                              // 通过 setter 修改
+    std::cout << "The year is: " << d.getYear() << '\n'; // 通过 getter 读取
+
+    const Date cd{};                              // const 对象
+    cd.print();                                   // ✅ print/getter 都是 const
+    // cd.setYear(2000);                          // ❌ 编译错误：const 对象不能调用非 const 的 setter
+}
+
+// ── 2. 三种命名约定 ────────────────────────────────────────
+// 1) get/set 前缀：语义清晰（上面已演示）
+// 2) 无前缀（标准库风格）：getter 和 setter 同名，靠重载区分
+// 3) 折中：getter 无前缀 + setter 带 set 前缀（推荐，setter 用 set 更能体现"会改变状态"）
+class Point {
+private:
+    int m_x{ 0 };
+    int m_y{ 0 };
+
+public:
+    int x() const { return m_x; }     // 无前缀 getter
+    void x(int value) { m_x = value; } // 无前缀 setter（重载区分）
+    int y() const { return m_y; }
+    void setY(int value) { m_y = value; } // 折中风格：setter 带 set
+};
+
+void demo_naming()
+{
+    Point p{};
+    p.x(5);          // 无前缀 setter：语义不够直观，不像"设置"
+    std::cout << p.x() << '\n'; // 无前缀 getter：简洁，标准库风格
+    p.setY(3);
+    std::cout << p.y() << '\n';
+}
+
+// ── 3. getter 的返回方式：按值 or const 左值引用 ──────────
+// 拷贝成本低（int、double 等标量）→ 按值返回
+// 拷贝成本高（std::string、大对象）→ 按 const 左值引用返回
+class Name {
+private:
+    std::string m_name{ "Boo" };
+
+public:
+    std::string name() const { return m_name; }              // 按值：拷贝成本可接受
+    const std::string& nameRef() const { return m_name; }    // const 引用：避免拷贝
+    void setName(const std::string& name) { m_name = name; } // setter 参数同理用 const 引用
+};
+
+void demo_return_type()
+{
+    Name n{};
+    std::string copy{ n.name() };   // 得到一份副本，安全
+    const std::string& ref{ n.nameRef() }; // 只读别名，无拷贝
+    n.setName("Lee");               // 注意：引用指向的对象内容被改变
+    std::cout << copy << ' ' << ref << '\n';
+}
+
+// ── 4. 务实的设计准则 ─────────────────────────────────────
+// 1) 无不变量 + 大量访问函数 → 直接用 struct（成员 public）
+// 2) 优先实现"行为"而非访问函数：kill()/revive() 好过 setAlive(bool)
+// 3) 仅在公共接口确实需要时才提供 getter/setter
+struct PlainData {   // 没有不变量约束 → 用 struct，直接访问成员
+    int width{ 0 };
+    int height{ 0 };
+};
+
+class Creature {     // 有业务含义 → 用行为代替 setter
+private:
+    bool m_alive{ true };
+
+public:
+    void kill() { m_alive = false; }
+    void revive() { m_alive = true; }
+    bool isAlive() const { return m_alive; } // 状态查询保留 getter
+};
+
+void demo_design()
+{
+    PlainData pd{};         // struct：直接访问，不需要 setter
+    pd.width = 100;
+    std::cout << pd.width << '\n';
+
+    Creature c{};
+    std::cout << c.isAlive() << '\n'; // 1
+    c.kill();
+    std::cout << c.isAlive() << '\n'; // 0
+    // c.m_alive = true;               // ❌ 编译错误：m_alive 是私有成员，不能直接访问
+}
+
+// ── main ──────────────────────────────────────────────────
+int main()
+{
+    demo_basic();
+    demo_naming();
+    demo_return_type();
+    demo_design();
+    return 0;
+}
+```
+
+## 构造函数
+
+```cpp
+// ── 1. 聚合初始化的边界：私有成员让类不再是聚合 ────────────
+// struct（全 public）→ 聚合初始化可用
+// class（有私有成员）→ 不能聚合初始化，需要匹配的构造函数
+#include <iostream>
+#include <string_view>
+
+struct AggFoo {          // 聚合：成员按定义顺序逐个初始化
+    int x{};
+    int y{};
+};
+
+class NonAggFoo {        // 有私有成员 → 不是聚合
+private:
+    int m_x{};
+    int m_y{};
+
+public:
+    NonAggFoo(int x, int y) // 构造函数：与类同名、无返回类型
+    {
+        std::cout << "NonAggFoo(" << x << ", " << y << ") constructed\n";
+    }
+    void print() const
+    {
+        std::cout << "NonAggFoo(" << m_x << ", " << m_y << ")\n";
+    }
+};
+
+void demo_aggregate()
+{
+    AggFoo af{ 6, 7 };       // ✅ 聚合初始化：af.x=6, af.y=7
+    std::cout << af.x << ' ' << af.y << '\n';
+
+    NonAggFoo nf{ 6, 7 };    // ✅ 匹配 NonAggFoo(int, int) 构造函数
+    nf.print();              // 打印 0 0 ！构造函数体并未初始化成员
+    // NonAggFoo bad{};      // ❌ 编译错误：无匹配构造函数（下一节的默认构造函数可解）
+}
+
+// ── 2. 构造函数参数的隐式转换 ──────────────────────────────
+// 与普通函数一致：实参可隐式转换为形参类型即可匹配
+void match_demo()
+{
+    NonAggFoo converted{ 'a', true }; // 'a'→int(97), true→int(1)，匹配成功
+}
+
+// ── 3. 构造函数不能是 const ───────────────────────────────
+// 构造函数要初始化（修改）对象，所以不能 const
+// const 对象的构造函数是隐式调用的，不受非 const 限制
+class Something {
+private:
+    int m_x{};
+
+public:
+    Something()          // 非 const，但合法
+    {
+        m_x = 5;         // 只有非 const 的构造函数才能修改成员
+    }
+    int getX() const { return m_x; }
+};
+
+void demo_const_ctor()
+{
+    const Something s{}; // ✅ const 对象的构造函数是隐式调用的
+    std::cout << s.getX() << '\n'; // 5
+}
+
+// ── 4. 构造函数 vs Setter ─────────────────────────────────
+// 构造函数：在实例化点初始化整个对象
+// setter：给已存在对象的单个成员赋值
+class Point {
+private:
+    int m_x{};
+    int m_y{};
+
+public:
+    Point(int x, int y) { m_x = x; m_y = y; } // 出生时整体初始化
+    void setX(int x) { m_x = x; }             // 之后逐个修改
+};
+
+void demo_ctor_vs_setter()
+{
+    Point p{ 1, 2 };     // 构造：创建即完整
+    p.setX(10);          // setter：局部修改已存在的对象
+    std::cout << p.getX() << '\n'; // 需补 getX，此处示意
+}
+
+// ── main ──────────────────────────────────────────────────
+int main()
+{
+    demo_aggregate();
+    match_demo();
+    demo_const_ctor();
+    return 0;
+}
+```
+
+## 构造函数成员初始化列表
+
+```cpp
+// ── 1. 成员初始化列表：正确的成员初始化方式 ────────────────
+// 语法：参数列表后冒号开头，成员{初始值}，逗号分隔
+// 只能用直接初始化（{}或()），不能用 = 复制初始化
+#include <iostream>
+#include <algorithm>
+
+class Foo {
+private:
+    int m_x{};
+    int m_y{};
+
+public:
+    Foo(int x, int y)
+        : m_x{ x }       // ✅ 成员初始化列表：真正"初始化"
+        , m_y{ y }       //    推荐格式：冒号换行缩进，逗号开头对齐
+    {
+        std::cout << "Foo(" << x << ", " << y << ") constructed\n";
+    }
+    void print() const
+    {
+        std::cout << "Foo(" << m_x << ", " << m_y << ")\n";
+    }
+};
+
+void demo_init_list()
+{
+    Foo foo{ 6, 7 };
+    foo.print();          // 这次 print 输出 6 7（上一节的 0 0 问题解决了）
+    // Foo f2{ 6, 7 } 若写成 : m_x = x 形式 → ❌ 编译错误：列表不允许 = 
+}
+
+// ── 2. 初始化顺序陷阱：按类定义顺序，不是列表书写顺序 ──────
+// m_x 定义在前 → 永远先初始化 m_x，即使列表里 m_y 写在前面
+class BadOrder {
+private:
+    int m_x{};            // 定义在前，先初始化！
+    int m_y{};
+
+public:
+    BadOrder(int x, int y)
+        : m_y{ std::max(x, y) }, m_x{ m_y } // ❌ m_x 用了未初始化的 m_y → UB
+    {
+    }
+    void print() const
+    {
+        std::cout << "BadOrder(" << m_x << ", " << m_y << ")\n";
+    }
+};
+
+class GoodOrder {
+private:
+    int m_x{};            // 列表顺序与定义顺序一致
+    int m_y{};
+
+public:
+    GoodOrder(int x, int y)
+        : m_x{ std::max(x, y) }
+        , m_y{ m_x }      // ✅ m_x 已初始化，安全
+    {
+    }
+    void print() const
+    {
+        std::cout << "GoodOrder(" << m_x << ", " << m_y << ")\n";
+    }
+};
+
+void demo_order()
+{
+    BadOrder b{ 6, 7 };   // m_x 是垃圾值！编译器一般会发警告
+    b.print();
+    GoodOrder g{ 6, 7 };
+    g.print();            // GoodOrder(7, 7)
+}
+
+// ── 3. 三级优先级：列表 > 默认成员初始值 > 默认初始化 ──────
+class Priority {
+private:
+    int m_x{};            // 有默认值，但列表优先 → 被忽略
+    int m_y{ 2 };         // 有默认值且不在列表 → 用 2
+    int m_z;              // 无默认值也不在列表 → 默认初始化 = 未初始化！
+
+public:
+    Priority(int x) : m_x{ x } {}
+    void print() const
+    {
+        std::cout << "Priority(" << m_x << ", " << m_y << ", "
+                  << m_z << ")\n";  // m_z 是垃圾值，读它 = UB
+    }
+};
+
+void demo_priority()
+{
+    Priority p{ 6 };
+    p.print();            // 例如 Priority(6, 2, -858993460)
+    // 结论：每个成员要么进列表，要么给默认值，别让基本类型裸奔
+}
+
+// ── 4. 构造函数体是赋值，不是初始化（const/引用成员必踩坑）─
+class BodyAssign {
+private:
+    const int m_id;       // const 成员：只能初始化，不能赋值
+    int& m_ref;           // 引用成员：必须绑定时初始化
+
+public:
+    BodyAssign(int id, int& target)
+        : m_id{ id }      // ✅ 初始化列表是 const/引用成员的唯一入口
+        , m_ref{ target }
+    {
+        // m_id = id;     // ❌ 编译错误：const 成员不能在函数体赋值
+        // m_ref = target; // ❌ 这是指向的变量被改写，不是重新绑定
+    }
+    int id() const { return m_id; }
+    int ref() const { return m_ref; }
+};
+
+void demo_body_vs_list()
+{
+    int v{ 42 };
+    BodyAssign b{ 7, v };
+    std::cout << b.id() << ' ' << b.ref() << '\n'; // 7 42
+}
+
+// ── main ──────────────────────────────────────────────────
+int main()
+{
+    demo_init_list();
+    demo_order();
+    demo_priority();
+    demo_body_vs_list();
+    return 0;
+}
+```
+
+## 默认构造函数
+
+默认构造函数 = 可无参调用；全默认参数也算；只能有一个；声明了构造函数就没了隐式版，用 `=default` 补回；`=default` 保留值初始化的零初始化而空体 `{}` 不保留；最后——默认值有意义才提供，否则让编译器帮你拦住非法对象
+
+```cpp
+// ── 默认构造函数笔记卡片开始 ──────────────────────────────
+#include <iostream>
+#include <string>
+#include <string_view>
+
+// ── 1. 默认构造函数：能"无参调用"的构造函数 ────
+// 两种形式都算默认构造函数：无参构造 / 全参数有默认值
+// 值初始化 Foo f{} 与 默认初始化 Foo f; 对类类型等价，均调用默认构造函数
+// 最佳实践：一律用 {} 值初始化（对聚合也更安全）
+class Foo1 {
+public:
+    Foo1() { std::cout << "Foo1 默认构造\n"; }
+};
+class Foo2 {
+public:
+    Foo2(int x = 0, int y = 0) : m_x{ x }, m_y{ y } // 全默认参数 => 也是默认构造函数
+    { std::cout << "Foo2(" << m_x << ", " << m_y << ")\n"; }
+private:
+    int m_x{};
+    int m_y{};
+};
+
+void demo_basic() {
+    Foo1 f1{};   // 值初始化，调用 Foo1()
+    Foo1 f1b;    // 默认初始化，同样调用 Foo1()
+    Foo2 f2{};   // 用默认参数 (0,0) 调用 Foo2(int,int)
+    Foo2 f2b{ 6, 7 };
+}
+
+// ── 2. 一个类只能有一个默认构造函数（二义性） ────
+// Foo() 与 Foo(int=1, int=2) 同时存在时，Foo f{} 编译器不知调用哪个
+class Foo3 {
+public:
+    Foo3() {}
+    Foo3(int x = 1, int y = 2) : m_x{ x }, m_y{ y } {}
+private:
+    int m_x{};
+    int m_y{};
+};
+
+void demo_ambiguous() {
+    // Foo3 f{};  // ❌ 编译错误：默认构造函数调用有二义性
+    Foo3 f{ 1 }; // 指定参数则无歧义，调用 Foo3(int,int)
+    (void)f;
+}
+
+// ── 3. 隐式默认构造函数：声明了任何构造函数就不再生成 ────
+// 类没有用户声明的构造函数 => 编译器生成隐式默认构造函数（空体）
+// 一旦写了 Foo(int,int)，隐式默认构造函数消失，无参构造会失败
+class Point {
+public:
+    Point(int x, int y) : m_x{ x }, m_y{ y } {}
+private:
+    int m_x{};
+    int m_y{};
+};
+
+void demo_implicit_gone() {
+    // Point p{};  // ❌ 编译错误：无匹配的构造函数（隐式默认构造函数已被抑制）
+}
+
+// ── 4. =default 显式默认构造函数（最佳实践） ────
+// 手写空构造函数 Foo() {} 与 =default 行为不同（见第 5 节）
+// 优先使用 =default
+class Foo4 {
+public:
+    Foo4() = default;                       // 显式默认构造函数
+    Foo4(int x) : m_x{ x } { (void)x; }     // 有参构造抑制了隐式生成，靠 =default 补回
+private:
+    int m_x{};
+};
+
+void demo_explicit_default() {
+    Foo4 a{};      // 调用 =default 生成的默认构造函数
+    Foo4 b{ 3 };   // 调用有参构造
+    (void)a; (void)b;
+}
+
+// ── 5. =default 与空用户定义构造函数的关键区别 ────
+// 值初始化 X{} 时：=default（或无构造函数）会先对整个对象零初始化
+// 空体构造函数 X() {} 则没有零初始化阶段，无默认值的成员是未初始化的！
+class UserEmpty {
+public:
+    UserEmpty() {} // 空体，不进行零初始化
+    int a() const { return m_a; }
+    int b() const { return m_b; }
+private:
+    int m_a;   // 无默认成员初始化器 => 值初始化后仍是垃圾值
+    int m_b{}; // 有默认成员初始化器 => 安全
+};
+class Defaulted {
+public:
+    Defaulted() = default; // =default，零初始化阶段仍生效
+    int a() const { return m_a; }
+    int b() const { return m_b; }
+private:
+    int m_a;   // 值初始化时先被零初始化为 0，安全
+    int m_b{};
+};
+
+void demo_default_vs_empty() {
+    UserEmpty u{};
+    Defaulted d{};
+    std::cout << "空构造: a=" << u.a() << " b=" << u.b() << '\n'; // a 是垃圾值(UB)
+    std::cout << "=default: a=" << d.a() << " b=" << d.b() << '\n'; // 0 0
+    // 教训：给所有成员写默认成员初始化器 int m{};，彻底避免此类问题
+}
+
+// ── 6. 仅有意义时才提供默认构造函数 ────
+// 默认值有意义（Fraction 默认 0/1）=> 提供默认构造
+// 默认值无意义（雇员必须有名字和 ID）=> 不提供，让编译期直接报错
+class Fraction {
+public:
+    Fraction() = default; // 默认 0/1
+    Fraction(int n, int d) : m_n{ n }, m_d{ d } {}
+    void print() const { std::cout << "Fraction " << m_n << '/' << m_d << '\n'; }
+private:
+    int m_n{ 0 };
+    int m_d{ 1 };
+};
+class Employee {
+public:
+    Employee(std::string_view name, int id) : m_name{ name }, m_id{ id } {}
+    void print() const { std::cout << "Employee(" << m_name << ", " << m_id << ")\n"; }
+private:
+    std::string m_name{};
+    int m_id{};
+};
+
+void demo_when_to_provide() {
+    Fraction f1{ 3, 5 };
+    f1.print();     // Fraction 3/5
+    Fraction f2{};
+    f2.print();     // Fraction 0/1，默认值有意义
+
+    Employee e1{ "Joe", 1 };
+    e1.print();
+    // Employee e2{};  // ❌ 编译错误：无匹配构造函数——没有名字的雇员无意义
+}
+
+// ── main ─────────────────────────────
+int main() {
+    demo_basic();
+    demo_ambiguous();
+    demo_implicit_gone();
+    demo_explicit_default();
+    demo_default_vs_empty();
+    demo_when_to_provide();
+    return 0;
+}
+// ── 默认构造函数笔记卡片结束 ──────────────────────────────
+```
+
+## 委托构造函数
+
+多个构造函数的初始化列表和函数体往往高度相似（DRY 原则）。常见做法是抽一个私有成员函数（如 `printCreated()`）复用函数体逻辑，但初始化列表部分的重复无法消除
+
+```cpp
+// ── 委托构造函数笔记卡片开始 ──────────────────────────────
+#include <iostream>
+#include <string>
+#include <string_view>
+
+// ── 1. 构造函数体里"调用"另一个构造函数：行不通 ────
+// 在构造函数体内写 Employee(name); 是编译错误
+// 无参写法 Foo(); 更隐蔽：等价于 Foo{}，创建临时对象后立刻丢弃，无编译错误！
+class Foo1 {
+public:
+    int x{};
+    int y{};
+    Foo1() { x = 5; }
+    Foo1(int v) : y{ v }
+    {
+        // Foo1();  // ❌ 不是调用 Foo1()，而是值初始化一个临时 Foo1 对象并丢弃
+        //          //    本对象的 x 仍是 0，且无任何编译警告
+    }
+};
+
+void demo_naive_call() {
+    Foo1 f{ 9 };
+    std::cout << "Foo1: " << f.x << ' ' << f.y << '\n'; // 打印 0 9，而非期望的 5 9
+    // 教训：不要从函数体里直接调用构造函数
+}
+
+// ── 2. 委托构造函数：把另一个构造函数放进初始化列表 ────
+// 语法：Delegate(...) : Target{ args } { }  （构造函数链）
+// 执行顺序：被委托构造函数完整执行（初始化列表+函数体）=> 委托者的函数体
+// 铁律：初始化列表里委托了，就不能再初始化其他成员（二选一）
+class Employee {
+private:
+    std::string m_name{};
+    int m_id{ 0 };
+public:
+    Employee(std::string_view name)
+        : Employee{ name, 0 } // 委托：参数少的 => 参数多的
+    {
+    }
+    Employee(std::string_view name, int id) // 非委托构造函数（链的末端）
+        : m_name{ name }, m_id{ id }
+    {
+        std::cout << "Employee " << m_name << " (" << m_id << ") created\n";
+    }
+};
+
+void demo_delegate() {
+    Employee e1{ "James" };  // 委托 => Employee(string_view, int) => 打印
+    Employee e2{ "Dave", 42 }; // 直接调用末端构造函数
+}
+
+// ── 3. 委托循环与方向选择 ────
+// A 委托 B、B 委托 A => 无限循环，栈耗尽崩溃；必须保证链末端是非委托构造函数
+// 方向惯例：参数少的委托给参数多的；反过来则多余成员无处初始化
+class Bad {
+private:
+    int a{};
+    int b{};
+public:
+    Bad() : Bad{ 1 } {}        // A 委托 B
+    Bad(int x) : Bad{}         // ❌ B 又委托 A：无限循环，运行时栈溢出
+    {
+        (void)x;
+    }
+};
+
+void demo_cycle() {
+    // Bad b{ 2 };  // ❌ 运行时崩溃：构造函数委托形成无限循环
+}
+
+// ── 4. 用默认参数减少构造函数数量 ────
+// 默认参数只能放最右侧 => 最佳实践：
+// 必须提供的成员先定义、作构造函数最左参数；有默认值的成员后定义、作最右参数
+class Employee2 {
+private:
+    std::string m_name{}; // 必须提供 => 最左
+    int m_id{ 0 };        // 可选     => 最右
+public:
+    Employee2(std::string_view name, int id = 0) // 一个构造函数覆盖两种调用
+        : m_name{ name }, m_id{ id }
+    {
+        std::cout << "Employee2 " << m_name << " (" << m_id << ")\n";
+    }
+};
+
+void demo_default_param() {
+    Employee2 a{ "James" };
+    Employee2 b{ "Dave", 42 };
+}
+
+// ── 5. 难题：默认值重复 与 static constexpr 解法 ────
+// 委托/默认参数都无法引用"默认成员初始化器"的值 => 字面值 0 需写多处
+// 解法：类内 static constexpr 常量，所有位置统一引用，值只定义一次
+class Employee3 {
+private:
+    static constexpr int default_id{ 0 }; // 命名常量：默认值的唯一出处
+    std::string m_name{};
+    int m_id{ default_id };                          // 用在默认成员初始化器
+public:
+    Employee3(std::string_view name, int id = default_id) // 用在默认参数
+        : m_name{ name }, m_id{ id }
+    {
+        std::cout << "Employee3 " << m_name << " (" << m_id << ")\n";
+    }
+};
+
+void demo_named_constant() {
+    Employee3 a{ "James" };
+    Employee3 b{ "Dave", 42 };
+}
+
+// ── main ─────────────────────────────
+int main() {
+    demo_naive_call();
+    demo_delegate();
+    demo_cycle();
+    demo_default_param();
+    demo_named_constant();
+    return 0;
+}
+// ── 委托构造函数笔记卡片结束 ──────────────────────────────
+```
+
+## 拷贝构造函数
+
+```cpp
+// ── 拷贝构造函数笔记卡片开始 ──────────────────────────────
+#include <iostream>
+#include <string>
+
+// ── 1. 拷贝构造函数：用同类型已有对象初始化新对象 ────
+// 隐式版本执行成员级逐一初始化，通常正是想要的 => 首选隐式
+class Fraction {
+private:
+    int m_numerator{ 0 };
+    int m_denominator{ 1 };
+public:
+    Fraction(int numerator = 0, int denominator = 1)
+        : m_numerator{ numerator }, m_denominator{ denominator }
+    {
+    }
+    // 手写拷贝构造函数：参数必须是（const）左值引用
+    // 访问控制按"类"而非按"对象"，故可直接读 fraction 的 private 成员
+    Fraction(const Fraction& f)
+        : m_numerator{ f.m_numerator }
+        , m_denominator{ f.m_denominator }
+    {
+        std::cout << "拷贝构造: (" << m_numerator << '/' << m_denominator << ")\n";
+    }
+    void print() const { std::cout << "Fraction(" << m_numerator << ", " << m_denominator << ")\n"; }
+};
+
+void demo_copy_ctor() {
+    Fraction f{ 5, 3 };       // 调用 Fraction(int,int)
+    Fraction fCopy{ f };      // 调用 Fraction(const Fraction&) 拷贝构造
+    f.print();
+    fCopy.print();
+}
+
+// ── 2. 参数为什么必须是引用 ────
+// 若参数是 Fraction f（按值），传参本身又要调拷贝构造 => 无限递归，编译错误
+// class Wrong {
+// public:
+//     Wrong(Wrong w) {}  // ❌ 编译错误：拷贝构造函数的参数不能按值传递
+// };
+
+// ── 3. 按值传参 / 按值返回 会隐式调用拷贝构造函数 ────
+// 注意：编译器可能做拷贝省略优化，实际拷贝次数可能少于预期
+void printFraction(Fraction f) // 按值传参 => 调用拷贝构造函数
+{
+    f.print();
+}
+
+Fraction makeFraction(int n, int d) {
+    Fraction f{ n, d };
+    return f; // 按值返回 => 理论上调用拷贝构造函数（可能被省略优化）
+}
+
+void demo_pass_by_value() {
+    Fraction f{ 5, 3 };
+    printFraction(f);                       // 拷贝 1 次
+    Fraction f2{ makeFraction(1, 2) };      // 返回时可能拷贝（可能被省略）
+    printFraction(f2);                      // 再拷贝 1 次
+}
+
+// ── 4. 拷贝构造函数不应有副作用 ────
+// 编译器在特定场景允许省略拷贝 => 依赖拷贝时打印/计数等行为不可靠
+// 正确姿势：拷贝构造函数只做复制
+
+// ── 5. =default 与 =delete ────
+class Defaulted {
+public:
+    Defaulted() = default;
+    Defaulted(const Defaulted&) = default; // 显式请求默认拷贝构造函数（成员级复制）
+};
+
+class NoCopy {
+public:
+    NoCopy() = default;
+    NoCopy(const NoCopy&) = delete;        // 禁止复制，拷贝尝试直接编译错误
+};
+
+void demo_default_delete() {
+    Defaulted a{};
+    Defaulted b{ a };  // OK：逐成员复制
+    NoCopy c{};
+    // NoCopy d{ c };  // ❌ 编译错误：拷贝构造函数已删除
+    (void)b; (void)c;
+}
+
+// ── 6. 拷贝时机陷阱：聚合容器内拷贝不可省略 ────
+// std::string 等类成员在成员级复制时执行深拷贝，注意性能
+class Contact {
+private:
+    std::string m_name{ "anonymous" };
+public:
+    Contact() = default;
+    Contact(const Contact& c) = default;   // string 成员用其自身的拷贝构造 => 深拷贝内容
+    const std::string& name() const { return m_name; }
+};
+
+void demo_member_copy() {
+    Contact a{};
+    Contact b{ a };
+    std::cout << "b.name = " << b.name() << '\n'; // "anonymous"，独立于 a 的副本
+}
+
+// ── main ─────────────────────────────
+int main() {
+    demo_copy_ctor();
+    demo_pass_by_value();
+    demo_default_delete();
+    demo_member_copy();
+    return 0;
+}
+// ── 拷贝构造函数笔记卡片结束 ──────────────────────────────
+```
+
+## 转换构造函数和explicit关键字
+
+**转换构造函数**是一种特殊的构造函数，它能用**一个**其他类型的参数，隐式地把那个类型转换成当前类的对象。而 **`explicit` 关键字**的作用，就是**禁止**这种隐式转换，强制要求必须显式地调用构造函数。
+
+// 在C++中，任何只接受一个参数的构造函数（或者虽然有多个参数，但除第一个外都有默认值的构造函数），都叫做转换构造函数。
+
+```cpp
+class MyString {
+public:
+    // 这是一个转换构造函数：它允许从 const char* 隐式转换为 MyString
+    MyString(const char* s) {
+        // 假设这里做了字符串拷贝
+    }
+};
+
+void printString(MyString str) {
+    // 打印 str
+}
+
+int main() {
+    // 正常调用：直接传 MyString 对象
+    printString(MyString("hello"));
+
+    // !!! 转换构造函数的隐式转换生效了 !!!
+    // 编译器看到 printString 需要 MyString，但你给了 const char*，
+    // 它会自动调用 MyString(const char*) 来创建一个临时对象。
+    printString("world");  // 这里发生了隐式转换，语法完全合法
+
+    return 0;
+}
+```
+
+```cpp
+class MyString {
+public:
+    // 加上 explicit，禁止隐式转换
+    explicit MyString(const char* s) {
+        // 假设这里做了字符串拷贝
+    }
+};
+
+void printString(MyString str) {
+    // 打印 str
+}
+
+int main() {
+    // 显式调用：完全没问题
+    printString(MyString("hello"));
+
+    // !!! 编译错误 !!!
+    // 因为构造函数是 explicit 的，编译器不能再偷偷把 "world" 转成 MyString
+    printString("world");  // 这行会报错
+
+    // 但如果你用 C++ 的列表初始化（花括号），且是直接初始化，依然可以
+    MyString s1{"hello"};  // OK
+    // MyString s2 = "hello"; // 这也属于隐式转换，会报错（拷贝初始化）
+
+    return 0;
+}
+```
+
+### 为什么用explicit关键字？
+
+1. **防止意外的类型转换**：隐式转换有时候会在你无意识的情况下发生，导致代码执行了你没预料到的操作，产生难以追踪的 bug。
+2. **让代码意图更清晰**：阅读代码的人看到 `MyString("world")`，立刻就明白这里创建了一个临时对象。如果只写 `"world"`，阅读者需要去查类的定义才能知道发生了转换
+
+## this指针
+
+- **本质**：每个**非静态**成员函数都有一个隐藏的、名为 `this` 的 `const` 指针参数，它指向当前正在操作的那个对象。
+- **编译器的幕后工作**：当你写下 `simple.setID(2)` 时，编译器会“偷偷”将它重写为类似 `Simple::setID(&simple, 2)` 的形式，把对象的地址作为参数传进去。
+- **成员访问的实质**：函数内部对成员变量（如 `m_id`）的访问，实际上都被编译器加上了 `this->` 前缀，变成了 `this->m_id`。所以 `this->m_id` 和直接写 `m_id` 是完全等价的，后者只是前者的简写。
+
+```cpp
+struct Something {
+    int data{};
+    void setData(int data) {
+        this->data = data; // this->data 是成员，data 是参数
+    }
+};
+```
+
+## 析构函数
+
+对象销毁时清理工作**必然**要做，为什么不自动做呢？——这就是析构函数的意义：**对象销毁时自动执行的清理机制**
+
+```cpp
+#include <iostream>
+
+class Simple {
+private:
+    int m_id {};
+public:
+    Simple(int id) : m_id { id } {
+        std::cout << "Constructing Simple " << m_id << '\n';
+    }
+    ~Simple() {  // 析构函数
+        std::cout << "Destructing Simple " << m_id << '\n';
+    }
+};
+
+int main() {
+    Simple simple1{ 1 };
+    {                          // 嵌套作用域
+        Simple simple2{ 2 };
+    }                          // simple2 在这里销毁（作用域结束）
+    return 0;
+}                              // simple1 在这里销毁
+```
+
+Constructing Simple 1
+Constructing Simple 2
+Destructing Simple 2   ← 先销毁后构造的
+Destructing Simple 1
+
+## 静态成员变量
+
+每个对象都有自己独立的 `value` 副本。但有时我们希望**所有对象共享同一份数据**——比如计数器、ID 生成器，这时就需要 `static`。**本质**：静态成员就是**放在类作用域里的全局变量**。它有静态存储期——程序启动时创建、结束时销毁，**和对象的生命周期完全无关**。哪怕一个对象都没创建，它也存在。
+
+```cpp
+class Whatever {
+public:
+    // ① 常量整型/枚举：本来就允许
+    static const int s_value{ 4 };
+
+    // ② inline 变量：任何类型都行（首选）
+    static inline int s_count{ 0 };
+
+    // ③ constexpr：隐式 inline，还支持类类型
+    static constexpr double s_ratio{ 2.2 };
+    static constexpr std::string_view s_view{ "Hello" };
+};
+
+class Something {
+private:
+    static inline int s_idGenerator{ 1 };  // 所有对象共享的计数器
+    int m_id{};                            // 每个对象自己的 ID
+public:
+    Something() : m_id{ s_idGenerator++ } {}  // 取当前值并自增
+    int getID() const { return m_id; }
+};
+
+int main() {
+    Something first{}, second{}, third{};
+    std::cout << first.getID() << '\n';   // 1
+    std::cout << second.getID() << '\n';  // 2
+    std::cout << third.getID() << '\n';   // 3
+}
+```
+
+## 静态成员函数
+
+静态成员变量如果设为 `private`，外界就没法直接访问了。用普通成员函数虽然可以访问它，但**必须先创建一个对象**才能调用，解决方案：把函数也声明为 `static`
+
+```cpp
+class Something {
+private:
+    static inline int s_value{ 1 };
+public:
+    static int getValue() { return s_value; }  // static 成员函数
+};
+
+int main() {
+    std::cout << Something::getValue() << '\n';  // 不需要任何对象！
+}
+```
+
+普通成员函数调用时隐式传入一个 `this` 指针指向当前对象。静态成员函数不作用于任何对象，所以**没有 `this`**；只能访问静态成员；
+
+## 友元函数
+
+前几节课一直在强调封装的好处：私有成员 + 公共接口。但有些场景会陷入两难：
+
+- **职责分离**：比如“存储类”和“显示类”分开设计很合理，但显示类需要读存储类的私有数据才能工作
+- **语法偏好**：有些功能写成非成员函数更自然（最典型的是后面的运算符重载，如 `cout << obj`）
+- **不想污染公共接口**：为这些功能专门加 public 成员函数，会暴露过多实现细节、让接口变臃肿
+
+我们需要一种**按个案精确开放访问权限**的机制——这就是 `friend`。
+
+**友元权限由“被访问的类”自己授予**（在类内写 friend 声明），而不是由想访问的类自行决定。类的封装权始终在自己手里。
+
+```cpp
+class Accumulator {
+private:
+    int m_value{ 0 };
+public:
+    void add(int value) { m_value += value; }
+
+    friend void print(const Accumulator& accumulator);  // 友元声明
+};
+
+// 注意：这是普通函数，不是成员函数！没有 Accumulator:: 前缀
+void print(const Accumulator& accumulator) {
+    std::cout << accumulator.m_value;  // ✅ 可以访问私有成员
+}
+
+int main() {
+    Accumulator acc{};
+    acc.add(5);
+    print(acc);  // 直接调用，不是 acc.print()
+}
+```
+
+## 友元类和友元成员函数
+
+友元类则是授予**另一个类的所有成员函数**访问权
+
+```cpp
+class Storage {
+private:
+    int m_nValue{};
+    double m_dValue{};
+public:
+    Storage(int nValue, double dValue)
+        : m_nValue{ nValue }, m_dValue{ dValue } {}
+
+    friend class Display;  // 授予 Display 类友元权限
+};
+
+class Display {
+private:
+    bool m_displayIntFirst{};
+public:
+    void displayStorage(const Storage& storage) {
+        // Display 是 Storage 的友元 → 可访问其全部私有成员
+        if (m_displayIntFirst)
+            std::cout << storage.m_nValue << ' ' << storage.m_dValue << '\n';
+        else
+            std::cout << storage.m_dValue << ' ' << storage.m_nValue << '\n';
+    }
+};
+
+friend void Display::displayStorage(const Storage& storage); // 单独授予一个函数权限
+```
+
