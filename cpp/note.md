@@ -3860,3 +3860,112 @@ public:
 friend void Display::displayStorage(const Storage& storage); // 单独授予一个函数权限
 ```
 
+# 动态数组
+
+## 容器
+
+```cpp
+// 【非容器】C样式数组：语言内置，但不是STL容器
+int c_arr[3] = {1, 2, 3};
+// 没有 .size()、.at()、迭代器，传参退化为指针 → 行为危险"
+
+// 【标准容器】std::array：固定大小的安全替代
+std::array<int, 3> arr = {1, 2, 3};
+arr.at(10); // 越界抛异常，而非未定义行为 → "C数组的安全替代"
+
+// 【标准容器·重点】std::vector：动态大小，接口最完整
+std::vector<int> vec = {1, 2, 3};
+vec.push_back(4); // 动态扩容 → "最灵活，本章重点"
+```
+
+## vector和列表初始化
+
+`std::vector` 同时支持两种构造函数：一种接受"元素个数 + 默认值"，另一种接受"初始值列表"
+
+```cpp
+// 场景1：两个参数都是整数 → 歧义高发区
+std::vector<int> v1(5, 2);   // ✅ 明确：5个元素，每个值为2 → {2,2,2,2,2}
+std::vector<int> v2{5, 2};   // ⚠️ 注意：这是列表初始化 → {5, 2}，不是5个2！
+
+// 场景2：只有一个整数参数 → 同样有歧义
+std::vector<int> v3(5);      // ✅ 圆括号：5个默认构造的int → {0,0,0,0,0}
+std::vector<int> v4{5};      // ⚠️ 花括号：列表初始化 → {5}，不是5个0！
+```
+
+3个规则
+
+```cpp
+// 规则1：想要N个相同值 → 永远用圆括号
+std::vector<int> zeros(10, 0);     // ✅ 10个0
+// std::vector<int> zeros{10, 0};  // ❌ 这会变成 {10, 0} 两个元素
+
+// 规则2：想要指定的一组值 → 用花括号
+std::vector<int> primes{2, 3, 5, 7}; // ✅ 明确的值列表
+
+// 规则3：空vector → 两种方式等价，但推荐默认构造
+std::vector<int> empty1;           // ✅ 推荐，简洁
+std::vector<int> empty2{};         // ✅ 也可以，显式列表初始化
+// std::vector<int> empty3();      // ❌ 警告！这是函数声明，不是变量定义（Most Vexing Parse）
+```
+
+## vector无符号长度的问题
+
+C++ 标准库容器类的长度和下标类型被设计成了**无符号类型**
+
+```cpp
+#include <iostream>
+#include <vector>
+
+int main() {
+    std::vector<int> v{1, 2, 3, 4, 5};
+    
+    int n = 3;
+    // 下面这行：n 是 int（有符号），v.size() 返回 size_type（无符号）
+    // 当 n 被隐式转为无符号时，如果 n 是负数就会变成超大值
+    if (n < v.size() - 10) {  // v.size() - 10 是无符号！
+        std::cout << "ok\n";
+    }
+    // 如果 v.size() 是 5，v.size() - 10 不是 -5，而是 18446744073709551611
+    // 所以 n(3) < 超大值 → true！逻辑完全错了。
+}
+```
+
+访问的正确方式
+
+```cpp
+#include <iostream>
+#include <vector>
+
+int main() {
+    std::vector<int> prime{2, 3, 5, 7, 11};
+    
+    // std::ssize() 返回有符号整数（通常是 std::ptrdiff_t）
+    std::cout << "length: " << std::ssize(prime) << '\n';  // 5 ✅ 有符号！
+    
+    // 用 auto 让编译器推断正确的有符号类型
+    auto length{std::ssize(prime)};  // ✅ 有符号，无转换警告
+    
+    // 如果要存到 int，记得 static_cast
+    int len{static_cast<int>(std::ssize(prime))};
+}
+```
+
+两种访问元素的方式
+
+```cpp
+#include <iostream>
+#include <vector>
+
+int main() {
+    std::vector<int> prime{2, 3, 5, 7, 11};
+    
+    // ✅ operator[]：快，但不检查边界
+    std::cout << prime[3];   // 输出 7，正常
+    std::cout << prime[9];   // ⚠️ 未定义行为！可能崩溃、输出垃圾值、或看起来"正常"
+    
+    // ✅ at()：慢一点，但越界时抛异常
+    std::cout << prime.at(3); // 输出 7，正常
+    std::cout << prime.at(9); // ❌ 抛出 std::out_of_range 异常，程序终止
+}
+```
+
