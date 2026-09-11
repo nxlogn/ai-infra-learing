@@ -1,21 +1,15 @@
-#include <iostream>
+#include <bits/stdc++.h>
+
+struct ListNode {
+    int val;
+    ListNode *next;
+    ListNode() : val(0), next(nullptr) {}
+    ListNode(int x) : val(x), next(nullptr) {}
+    ListNode(int x, ListNode *next) : val(x), next(next) {}
+};
 
 using namespace std;
 
-class person {
-  private:
-    int m_x{};
-    int m_y{};
-
-  public:
-    person(int x, int y) : m_x{x}, m_y{y} { cout << m_x << " " << m_y<<endl; }
-    void print() const {
-        cout<<m_y<<" "<<m_x;
-    }
-};
-
 int main() {
-    person p1{1, 2};
-    p1.print();
-    return 0;
+  vector<int> m(6, 0);
 }

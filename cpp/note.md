@@ -3969,3 +3969,234 @@ int main() {
 }
 ```
 
+## 移动语义
+
+**绝对不要返回局部对象的引用**。函数返回后栈帧销毁，引用指向的内存已经无效，访问它就是未定义行为
+
+```cpp
+// ❌ 危险！返回局部变量的引用
+std::vector<int>& makePrimes() {
+    std::vector<int> primes{2, 3, 5, 7};
+    return primes;  // primes 在函数结束时销毁，引用悬空！
+}
+```
+
+对于 `std::vector` 来说，它内部存的是三个指针（起始地址、结束地址、容量末尾）。"拷贝"意味着分配新内存、逐个复制元素；"移动"只是把这三个指针复制到新对象，然后把旧对象的指针置空。**移动的时间复杂度是 O(1)，与元素数量无关**。
+
+隐式移动
+
+```cpp
+std::vector<int> generate() {
+    std::vector<int> vec{1, 2, 3, 4, 5};
+    return vec;  // ✅ 编译器自动应用 NRVO 或隐式移动
+}
+```
+
+显示移动
+
+```cpp
+std::vector<int> generate() {
+    std::vector<int> vec{1, 2, 3, 4, 5};
+    return std::move(vec);  // ⚠️ 阻止了 NRVO！
+}
+```
+
+## 基于范围的for循环
+
+vector的index是sizet类型，是无符号整型，容易产生0-巨大数的问题，一般不使用index方式
+
+```cpp
+// 良好：word 只是数组元素的别名，零拷贝
+for (const auto& word : words)
+    std::cout << word << ' ';
+// 糟糕：每个 string 都被完整复制一遍
+for (auto word : words)
+    std::cout << word << ' ';
+```
+
+## vector大小调整和容量
+
+长度（size） 当前 正在使用 的元素个数 `.size()` 
+
+容量（capacity） 内存中 总共分配了 多少个元素的空间 `.capacity()`
+
+```cpp
+std::vector v { 0, 1, 2 };  // 容量 3，长度 3
+v.resize(5);                 // 容量 5，长度 5
+v.resize(3);                 // 容量仍是 5！长度 3
+v.resize(5);                 // 容量 5，无需重新分配
+```
+
+## 动态追加pushback
+
+push 触发重新分配时，vector 会 多预留一些空间 ，避免每次 push 都重新分配，先用reserve预分配容量；
+
+```cpp
+stack.reserve ( 6 ); // 容量 6，长度仍为 0
+```
+
+## array
+
+`std::array` = 安全版 C 数组 + constexpr 能力；长度决定类型，所以长度必须是编译期常量；没有构造函数，全靠聚合初始化（记得用`{}` ）。
+
+```cpp
+constexpr std::array<int, 5> a { 1, 2, 3, 4, 5 };  // 编译期已知、要 constexpr → array
+std::vector<int> b(n);                              // 长度运行时才定 → vector
+```
+
+array 的长度活在类型系统里，所以长度永远是 constexpr、`std::get` 能把越界检查搬到编译期——这两点是 vector 给不了的
+
+```cpp
+std::array arr { 9, 7, 5, 3, 1 };
+
+arr.size()            // 运行时调用，返回 constexpr 长度
+std::size(arr)        // 同上，C++17 风格
+std::ssize(arr)       // 要有符号长度时用它（C++20）
+arr[i]                // 默认选择，自己保证不越界
+std::get<k>(arr)      // 索引是编译期常量时用它，越界直接编译报错
+```
+
+# 迭代器和算法
+
+## 迭代器
+
+迭代器就是一个用来遍历容器的对象 ，提供对容器中每个元素的访问。它的根本价值是 统一接口、屏蔽底层差异 ：
+
+- `++` 操作符 → 移动到下一个元素
+- `*` 操作符 → 访问当前元素
+
+```cpp
+auto begin{ array.begin() };  // 成员函数版本
+auto end{ array.end() };
+
+auto b{ std::begin(array) }; // 泛型函数版本，C 风格数组也能用（在 <iterator> 中）
+auto e{ std::end(array) };
+```
+
+## 算法
+
+### std::find —— 按值查找
+
+```cpp
+auto found{ std::find(arr.begin(), arr.end(), search) };
+if (found == arr.end())      // 没找到 → 返回 end()
+    std::cout << "not found\n";
+else
+    *found = replace;        // 找到了 → 解引用即可修改
+```
+
+三个关键点：
+
+- 参数 = **起点迭代器 + 终点迭代器 + 查找值**
+- 返回**迭代器而非下标**；找不到时返回 `end()`，所以判断条件是 `== arr.end()`
+- 找到后可以直接 `*found = ...` 修改值
+
+### std::find_if —— 按条件查找
+
+和 `find` 的区别：第三个参数从一个值变成**可调用对象（函数指针/Lambda）**。它对每个元素调用该函数，返回 true 即命中：
+
+```cpp
+bool containsNut(std::string_view str) {
+    return (str.find("nut") != std::string_view::npos);  // npos = 没找到
+}
+
+auto found{ std::find_if(arr.begin(), arr.end(), containsNut) };
+// 输出: Found walnut
+```
+
+### std::count / std::count_if —— 计数
+
+和 `find`/`find_if` 是同一家族，只是返回**个数**而非迭代器：
+
+```cpp
+auto nuts{ std::count_if(arr.begin(), arr.end(), containsNut) }; // 2
+// std::count(...) 则统计等于指定值的个数
+```
+
+### std::sort 自定义排序（重点）
+
+`std::sort` 有个重载可以传**自定义比较函数**，签名的语义是：**接收两个参数，如果第一个应该排在第二个前面（更小/更优先），返回 true**。
+
+```cpp
+bool greater(int a, int b) {   // 名字起得很贴切
+    return (a > b);            // a 比 b 大 → a 排前面 → 降序
+}
+
+std::sort(arr.begin(), arr.end(), greater);  // 传函数指针，不带括号
+// 99 90 80 40 13 5
+```
+
+**最常见的坑**：传的是 `greater` 而不是 `greater()`——后者是调用它（且这里没有实参，编译会报错）。不带括号才表示"把函数本身交给 sort"。
+
+```cpp
+std::sort(arr.begin(), arr.end(), std::greater{});   // C++14 后可推导模板参数
+```
+
+注意 `std::greater{}` 是**花括号实例化一个类型**，不是函数调用——这也解释了后面章节会讲的"函数对象"概念。
+
+### std::for_each —— 逐元素操作
+
+```cpp
+void doubleNumber(int& i) { i *= 2; }   // 注意传引用才能改原值
+
+std::for_each(arr.begin(), arr.end(), doubleNumber);  // 2 4 6 8
+```
+
+文章重点阐述了 vs `range-for` 的优势：**意图更明确，不易犯错**。对比一下：
+
+```cpp
+// ❌ 手写容易犯的错：忘写 &（不影响原数组）、隐式类型转换、误传别的变量
+for (auto& i : arr) { doubleNumber(i); }
+
+// ✅ for_each：意图锁定，这些都是函数签名强约束，漏不掉
+std::for_each(arr.begin(), arr.end(), doubleNumber);
+```
+
+而且 `for_each` 可以**跳过首尾元素**（用 `std::next` 移动迭代器），这是 range-for 做不到的：
+
+```cpp
+std::for_each(std::next(arr.begin()), arr.end(), doubleNumber); // 跳过 arr[0]
+```
+
+### 小结
+
+| 算法                  | 干什么               | 返回             |
+| --------------------- | -------------------- | ---------------- |
+| `std::find`           | 按值查首个匹配       | 迭代器 / `end()` |
+| `std::find_if`        | 按条件查首个匹配     | 迭代器 / `end()` |
+| `std::count/count_if` | 数个数               | 计数值           |
+| `std::sort`           | 排序（可自定义比较） | void             |
+| `std::for_each`       | 逐元素执行操作       | void             |
+
+# 动态内存分配
+
+## new和delete
+
+堆 ：由你通过`new` 向操作系统申请，返回一个 地址（指针） ，访问比栈慢一步（先取地址，再解引用取值），结束后必须用`delete` 归还
+
+```cpp
+int* ptr{ new int };       // 在堆上分配一个 int，返回地址保存到指针
+*ptr = 7;                  // 解引用访问
+int* p1{ new int(5) };     // 直接初始化
+int* p2{ new int{ 6 } };   // 统一初始化
+
+delete ptr;                // 归还内存，但 ptr 仍指向那块(已失效的)地址
+ptr = nullptr;             // 建议置空，避免悬空指针
+```
+
+动态内存不会自动释放，直到你`delete` 或程序结束。如果不小心把唯一的地址丢了，这块内存就永远还不了操作系统——这就是 内存泄漏 。三种典型泄漏场景：
+
+```cpp
+// 场景1: 指针出作用域
+void f() { int* ptr{ new int{} }; }      // 地址丢了，泄漏
+
+// 场景2: 重新赋值覆盖了旧地址
+int value{ 5 };
+int* ptr{ new int{} };
+ptr = &value;                            // old 地址丢失 → 泄漏
+
+// 场景3: 重复分配
+int* ptr{ new int{} };
+ptr = new int{};                         // 第一次的地址被覆盖 → 泄漏
+```
+
