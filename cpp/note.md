@@ -4200,3 +4200,93 @@ int* ptr{ new int{} };
 ptr = new int{};                         // 第一次的地址被覆盖 → 泄漏
 ```
 
+## 析构函数
+
+析构函数是类的一种特殊成员函数，在对象被销毁时**自动调用**，用于执行清理工作，比如释放对象在生命周期内申请的资源。它的命名规则很明确：与类名相同，前面加波浪号 `~`，不能有参数和返回值。析构函数是 C++ 资源管理（RAII）思想的基石——**将资源的生命周期与对象的生命周期绑定**
+
+```cpp
+class Simple {
+public:
+    Simple() { std::cout << "Constructing\n"; }
+    ~Simple() { std::cout << "Destructing\n"; } // 析构函数
+};
+```
+
+```cpp
+class MyArray {
+    int* m_data;
+    std::size_t m_size;
+public:
+    MyArray(std::size_t size) : m_size(size) {
+        m_data = new int[m_size]{}; // 构造函数中分配
+    }
+    ~MyArray() {
+        delete[] m_data; // 析构函数中必须释放！用 delete[] 而非 delete
+    }
+};
+```
+
+# 函数
+
+## lambda
+
+函数指针的不便：为了传递一个只使用一次的简单判断函数，你**必须在全局作用域定义一个具名函数**，代码被割裂，可读性也差，允许**在函数内部定义匿名函数**，避免命名空间污染，同时让函数定义尽可能靠近使用位置
+
+- **捕获列表**：可以为空 `[]`，表示不捕获外部变量
+- **参数列表**：为空时可省略
+- **返回类型**：可省略，编译器会自动推导（在 Lambda 中通常没问题，因为函数体简单
+
+```cpp
+auto found{ std::find_if(arr.begin(), arr.end(),
+    [](std::string_view str) {
+        return str.find("nut") != std::string_view::npos;
+    }) };
+```
+
+### lambda的存储
+
+```cpp
+// 方式 1：函数指针（仅无捕获）
+double (*addNumbers1)(double, double){ [](double a, double b) { return a + b; } };
+
+// 方式 2：std::function
+std::function addNumbers2{ [](double a, double b) { return a + b; } };
+
+// 方式 3：auto（推荐）
+auto addNumbers3{ [](double a, double b) { return a + b; } };
+```
+
+### lambda作为参数传递
+
+```cpp
+// Case 1：std::function 参数
+void repeat1(int repetitions, const std::function<void(int)>& fn);
+
+// Case 2：函数模板（类型参数 T）
+template <typename T>
+void repeat2(int repetitions, const T& fn);
+
+// Case 3：缩写函数模板（C++20）
+void repeat3(int repetitions, const auto& fn);
+
+// Case 4：函数指针（仅限无捕获的 Lambda）
+void repeat4(int repetitions, void (*fn)(int));
+```
+
+## lambda的捕获
+
+Lambda 与普通嵌套块不同——**它默认无法访问外部作用域中的局部变量**，要访问普通局部变量，就必须使用**捕获子句**，把它列在 `[]` 中，**Lambda 看起来像直接访问外部变量，但实际上它捕获的是变量的副本**
+
+### 两种基本捕获方式
+
+| 方式           | 语法   | 特点                       |
+| :------------- | :----- | :------------------------- |
+| **按值捕获**   | `[x]`  | 捕获副本，默认不可修改     |
+| **按引用捕获** | `[&x]` | 捕获引用，可修改外部原变量 |
+
+# 移动语义和智能指针
+
+**裸指针没有内建机制来清理自己**。而类对象有一个天然优势——**析构函数会在对象超出作用域时自动调用**。如果把资源的所有权交给一个类对象，在构造函数中获取资源、在析构函数中释放资源，就能保证资源**无论函数如何终止都会被正确释放**。这就是 **RAII（资源获取即初始化）** 的核心思想
+
+# 操作符重载
+
