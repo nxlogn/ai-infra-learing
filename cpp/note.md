@@ -4286,7 +4286,145 @@ Lambda 与普通嵌套块不同——**它默认无法访问外部作用域中�
 
 # 移动语义和智能指针
 
+移动语义解决" 所有权转移时不做无谓拷贝 "，智能指针解决" 堆内存自动释放 "。它们关系密切——智能指针本身就是靠移动语义才能安全转移所有权的
+
+## 移动语义
+
+关键认知：`std::move` 什么都不移动 ！它只是一个强制类型转换，把左值转成右值引用（转为`T&&` ），从而让重载决议选中移动版本：
+
+```cpp
+std::vector<int> a = {1, 2, 3};
+std::vector<int> b = std::move(a);
+// 等价于 b = a.operator=(static_cast<std::vector<int>&&>(a));
+// 效果：b 偷走 a 内部堆数组的指针，a 变空 vector
+```
+
+```cpp
+class MyString {
+    char* data_;
+    size_t size_;
+public:
+    // 拷贝构造：深拷贝，O(n)
+    MyString(const MyString& o)
+        : data_(new char[o.size_]), size_(o.size_) {
+        std::memcpy(data_, o.data_, size_);
+    }
+
+    // 移动构造：偷指针，O(1)，noexcept 很重要！
+    MyString(MyString&& o) noexcept
+        : data_(o.data_), size_(o.size_) {
+        o.data_ = nullptr;   // 置空源对象，防止 double free
+        o.size_ = 0;
+    }
+
+    MyString& operator=(MyString&& o) noexcept {
+        if (this != &o) {
+            delete[] data_;          // 先释放自己的旧资源
+            data_ = o.data_;         // 偷
+            size_ = o.size_;
+            o.data_ = nullptr;
+            o.size_ = 0;
+        }
+        return *this;
+    }
+
+    ~MyString() { delete[] data_; }
+};
+```
+
+一个类如果需要自定义下面五个中的任何一个，通常五个都要管：
+
+析构函数、拷贝构造、拷贝赋值、移动构造、移动赋值
+
+## 智能指针
+
 **裸指针没有内建机制来清理自己**。而类对象有一个天然优势——**析构函数会在对象超出作用域时自动调用**。如果把资源的所有权交给一个类对象，在构造函数中获取资源、在析构函数中释放资源，就能保证资源**无论函数如何终止都会被正确释放**。这就是 **RAII（资源获取即初始化）** 的核心思想
 
+```cpp
+// 极简版智能指针，理解了这个就理解了 90%
+template <class T>
+class MyPtr {
+    T* p;
+public:
+    MyPtr(T* raw) : p(raw) {}
+    ~MyPtr() { delete p; }        // 自动释放！异常、提前 return 都拦不住它
+    T& operator*()  { return *p; }
+    T* operator->() { return p; }
+};
+
+void f() {
+    MyPtr<int> q(new int(42));
+    cout << *q;
+    // 函数结束，q 销毁 → ~MyPtr 自动 delete → 永不泄漏
+}
+```
+
+### 标准库的智能指针用法
+
+```cpp
+#include <memory>   // 头文件在这
+
+void demo() {
+    auto p = std::make_unique<int>(42);  // 创建，p 拥有这块内存
+    std::cout << *p;                     // 用法和裸指针一样：*p 和 p->
+}   // p 离开作用域 → 内存自动释放，不用写一行 delete
+
+auto p = std::make_unique<int>(42);
+auto q = p;        // ❌ 编译错误！不能拷贝（否则两个人都以为自己要退房）
+
+auto q = std::move(p);  // ✅ 所有权转给 q
+// 此刻 p 变成 nullptr，什么都不拥有；q 负责最终释放
+```
+
+
+
 # 操作符重载
+
+操作符重载本质就是 给运算符定义一个函数 ，让用户自定义类型（class/struct）也能用`+` 、`==` 、`<<` 等运算符
+
+```cpp
+a + b;              // 运算符写法
+a.operator+(b);     // 函数调用写法
+```
+
+### 两种定义方式
+
+```cpp
+struct Complex {
+    double re, im;
+
+    // const 修饰：不修改自身；参数用 const& 避免拷贝
+    Complex operator+(const Complex& o) const {
+        return {re + o.re, im + o.im};
+    }
+};
+```
+
+```cpp
+struct Complex {
+    double re, im;
+
+    // 输出运算符必须是非成员（左操作数是 ostream，不是 Complex）
+    friend std::ostream& operator<<(std::ostream& os, const Complex& c) {
+        os << c.re << "+" << c.im << "i";
+        return os;   // 返回流引用，支持 cout << a << b 链式输出
+    }
+};
+
+// 支持 3.0 + c（混合类型运算）
+Complex operator+(double x, const Complex& c) {
+    return {x + c.re, c.im};
+}
+```
+
+### 常见示例
+
+仿函数（函数对象），stl比较器大量使用，lambda 本质上也是编译器生成的一个匿名仿函数对象。
+
+```cpp
+struct Greater {
+    bool operator()(int a, int b) const { return a > b; }
+};
+std::sort(v.begin(), v.end(), Greater{});
+```
 

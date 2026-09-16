@@ -25,14 +25,35 @@ using namespace std;
 
 // }
 
-struct Myarr {
-    int data[10]{};
+// struct Myarr {
+//     int data[10]{};
 
-    int &operator[](size_t i) { return data[i]; }
-    int operator[](size_t i) const { return data[i]; }
-};
-int main() {
-    Myarr a;
-    int x = a[5];
-    cout << x;
-}
+//     int &operator[](size_t i) { return data[i]; }
+//     int operator[](size_t i) const { return data[i]; }
+// };
+// int main() {
+//     Myarr a;
+//     int x = a[5];
+//     cout << x;
+// }
+
+// ================智能指针
+
+// template <class T>
+// class MyPtr {
+//     T* p;
+// public:
+//     MyPtr(T* raw) : p(raw) { }
+//     ~MyPtr() { delete p; }
+//     T& operator*() { return *p; }
+//     T* operator->() {return p;}
+// };
+
+// void f() {
+//     MyPtr<int> q(new int(42));
+//     cout<< *q;
+// }
+
+// int main() {
+//     f();
+// }
