@@ -4376,8 +4376,6 @@ auto q = std::move(p);  // ✅ 所有权转给 q
 // 此刻 p 变成 nullptr，什么都不拥有；q 负责最终释放
 ```
 
-
-
 # 操作符重载
 
 操作符重载本质就是 给运算符定义一个函数 ，让用户自定义类型（class/struct）也能用`+` 、`==` 、`<<` 等运算符
@@ -4427,4 +4425,704 @@ struct Greater {
 };
 std::sort(v.begin(), v.end(), Greater{});
 ```
+
+# 虚函数
+
+C++ 的**虚函数（virtual function）**用于实现运行时多态：**通过基类指针或引用调用函数时，根据对象的实际类型，执行对应版本。**
+
+我们先看一个例子。
+
+### 1. 没有虚函数时，会发生什么？
+
+```cpp
+#include <iostream>
+
+class Animal {
+public:
+    void speak() const {
+        std::cout << "动物发出声音\n";
+    }
+};
+
+class Dog : public Animal {
+public:
+    void speak() const {
+        std::cout << "汪汪\n";
+    }
+};
+
+int main() {
+    Dog dog;
+    Animal& animal = dog;
+
+    dog.speak();     // 汪汪
+    animal.speak();  // 动物发出声音
+}
+```
+
+虽然 `animal` 引用的实际对象是 `Dog`，但 `animal` 的声明类型是 `Animal&`。
+
+由于 `speak()` **不是虚函数**，编译器根据表达式的类型选择调用哪个函数，所以 `animal.speak()` 调用的是 `Animal::speak()`。
+
+这里要区分两个概念：
+
+```
+Animal& animal = dog;
+// 静态类型：Animal& —— 编译时已知的类型
+// 动态类型：Dog     —— 所引用对象的实际类型
+```
+
+### 2. 加上 virtual，让实际对象决定调用哪个版本
+
+```cpp
+#include <iostream>
+
+class Animal {
+public:
+    virtual void speak() const {
+        std::cout << "动物发出声音\n";
+    }
+
+    virtual ~Animal() = default;
+};
+
+class Dog : public Animal {
+public:
+    void speak() const override {
+        std::cout << "汪汪\n";
+    }
+};
+
+class Cat : public Animal {
+public:
+    void speak() const override {
+        std::cout << "喵喵\n";
+    }
+};
+
+void makeSound(const Animal& animal) {
+    animal.speak();
+}
+
+int main() {
+    Dog dog;
+    Cat cat;
+
+    makeSound(dog);  // 汪汪
+    makeSound(cat);  // 喵喵
+}
+```
+
+关键在这一行：
+
+```cpp
+virtual void speak() const;
+```
+
+`virtual` 告诉编译器：通过基类指针或引用调用这个函数时，需要按照对象的实际类型选择实现。
+
+于是，同一个函数：
+
+```cpp
+void makeSound(const Animal& animal) {
+    animal.speak();
+}
+```
+
+传入 `Dog` 就执行 `Dog::speak()`，传入 `Cat` 就执行 `Cat::speak()`。`makeSound()` 无须知道每个派生类的细节，这就是**运行时多态**。
+
+### 3. override 是干什么的？
+
+派生类中的：
+
+```cpp
+void speak() const override;
+```
+
+表示：“我打算重写基类的虚函数，请编译器检查我是否写对了。”
+
+例如，不小心漏掉 `const`：
+
+```cpp
+class Dog : public Animal {
+public:
+    void speak() override {  // 编译错误：没有重写对应的基类虚函数
+        std::cout << "汪汪\n";
+    }
+};
+```
+
+因为以下两个函数的限定不同：
+
+```cpp
+void speak() const;  // 基类版本
+void speak();        // 派生类版本
+```
+
+如果没有 `override`，这种错误可能不会立即暴露，调用时却执行了基类实现。
+
+**建议：基类声明写 `virtual`，派生类重写写 `override`。** 一旦基类函数是虚函数，派生类重写后仍然是虚函数，不必重复写 `virtual`。
+
+### 4. 纯虚函数：要求派生类提供实现
+
+有时，“动物发出声音”没有一个有意义的通用实现，我们只想规定：具体动物必须提供 `speak()`。
+
+可以写成：
+
+```cpp
+class Animal {
+public:
+    virtual void speak() const = 0;  // 纯虚函数
+    virtual ~Animal() = default;
+};
+
+class Dog : public Animal {
+public:
+    void speak() const override {
+        std::cout << "汪汪\n";
+    }
+};
+```
+
+`= 0` 表示这是**纯虚函数**，不是返回值等于零。
+
+存在尚未实现的纯虚函数的类是**抽象类**，不能直接创建对象：
+
+```cpp
+// Animal animal;  // 编译错误：Animal 是抽象类
+
+Dog dog;           // 可以：Dog 已实现 speak()
+Animal& a = dog;   // 可以用基类引用指向派生类对象
+a.speak();         // 汪汪
+```
+
+抽象类适合用来定义接口，例如：“所有图形都必须能计算面积”。
+
+```cpp
+class Shape {
+public:
+    virtual double area() const = 0;
+    virtual ~Shape() = default;
+};
+
+class Rectangle : public Shape {
+    double width;
+    double height;
+
+public:
+    Rectangle(double w, double h) : width(w), height(h) {}
+
+    double area() const override {
+        return width * height;
+    }
+};
+```
+
+使用方只需要依赖 `Shape`：
+
+```cpp
+void printArea(const Shape& shape) {
+    std::cout << shape.area() << '\n';
+}
+```
+
+以后新增圆形、三角形，`printArea()` 都可以继续使用。
+
+### 5. 为什么基类析构函数也要写 virtual？
+
+如果要**通过基类指针删除派生类对象**，基类析构函数通常必须是虚函数。
+
+```cpp
+class Base {
+public:
+    virtual ~Base() {
+        std::cout << "销毁 Base\n";
+    }
+};
+
+class Derived : public Base {
+public:
+    ~Derived() override {
+        std::cout << "销毁 Derived\n";
+    }
+};
+
+int main() {
+    Base* p = new Derived;
+    delete p;
+}
+```
+
+输出：
+
+```
+销毁 Derived
+销毁 Base
+```
+
+虚析构函数保证先执行派生类析构，再执行基类析构。
+
+如果这里 `Base` 的析构函数不是虚函数，`delete p` 会导致**未定义行为**，不能简单理解为“只是少调用一次析构”。
+
+实际代码通常使用智能指针管理对象，但同样需要考虑虚析构：
+
+```cpp
+#include <memory>
+
+std::unique_ptr<Base> p = std::make_unique<Derived>();
+// 离开作用域时自动销毁，Base 的虚析构保证正确清理
+```
+
+### 6. 两个容易踩的坑
+
+**① 按值传递会发生对象切片。**
+
+以下使用第 2 节中可以实例化的 `Animal`：
+
+```cpp
+void makeSound(Animal animal) {  // 按值传递
+    animal.speak();
+}
+
+Dog dog;
+makeSound(dog);  // 动物发出声音
+```
+
+参数 `animal` 是一个新创建的 `Animal` 对象，只复制了 `dog` 中的基类部分，派生类部分被“切掉”了。此时参数的实际类型就是 `Animal`。
+
+需要多态时，使用指针或引用：
+
+```cpp
+void makeSound(const Animal& animal) {
+    animal.speak();
+}
+```
+
+**② 构造和析构期间，虚函数不会分派到更派生的类。**
+
+```cpp
+class Base {
+public:
+    Base() {
+        speak();  // 调用 Base::speak()
+    }
+
+    virtual void speak() {
+        std::cout << "Base\n";
+    }
+
+    virtual ~Base() = default;
+};
+
+class Derived : public Base {
+public:
+    void speak() override {
+        std::cout << "Derived\n";
+    }
+};
+
+Derived d;  // 输出 Base
+```
+
+执行 `Base` 构造函数时，`Derived` 部分还没有完成构造。因此，这时调用虚函数不会进入 `Derived::speak()`。在基类析构期间也有相同的限制。
+
+### 7. 底层大致如何实现？
+
+常见编译器通过**虚函数表（vtable）**和对象中的**虚表指针（vptr）**实现虚函数调用。C++ 标准规定行为，但不要求必须使用这种实现。
+
+可以粗略理解为：
+
+```cpp
+基类引用 animal
+      │
+      ▼
+实际的 Dog 对象
+      │ 虚表指针
+      ▼
+Dog 的虚函数表
+      │ speak 对应的入口
+      ▼
+Dog::speak()
+```
+
+典型实现会带来一些对象空间开销，调用时也可能多一次间接访问；如果编译器能确定实际类型，也可能优化成直接调用。
+
+你可以用这三行检查自己是否理解了核心区别：
+
+```cpp
+Animal& a = dog;
+
+a.speak();          // speak 是虚函数：调用 Dog::speak()
+                    // speak 非虚函数：调用 Animal::speak()
+
+a.Animal::speak();  // 显式指定基类版本：调用 Animal::speak()
+```
+
+# STL
+
+STL（Standard Template Library，标准模板库）是 C++ 中一套用于**存储数据、遍历数据和处理数据**的通用工具。学习它，可以从三个核心部分入手：
+
+| 部分   | 作用             | 例子                          |
+| ------ | ---------------- | ----------------------------- |
+| 容器   | 保存数据         | `vector`、`map`、`set`        |
+| 迭代器 | 访问容器中的元素 | `begin()`、`end()` 返回的对象 |
+| 算法   | 处理数据         | `sort`、`find`、`count`       |
+
+比如，把一些整数排序：
+
+```
+#include <algorithm>
+#include <iostream>
+#include <vector>
+
+int main() {
+    std::vector<int> nums = {4, 2, 5, 1, 3};  // 容器
+
+    std::sort(nums.begin(), nums.end());      // 迭代器 + 算法
+
+    for (int n : nums) {
+        std::cout << n << ' ';
+    }
+    // 输出：1 2 3 4 5
+}
+```
+
+下面把这三个部分串起来讲。
+
+**1. 容器：先从 vector 开始**
+
+`vector` 可以理解为**长度能够自动变化的连续数组**。
+
+普通数组创建后，长度固定：
+
+```
+int nums[3] = {10, 20, 30};
+```
+
+`vector` 则能在运行过程中添加、删除元素：
+
+```
+std::vector<int> nums = {10, 20, 30};
+
+nums.push_back(40);  // 末尾添加：10 20 30 40
+nums.pop_back();     // 删除末尾：10 20 30
+
+nums[1] = 99;        // 修改：10 99 30
+
+std::cout << nums[0];      // 10
+std::cout << nums.size();  // 3，当前元素数量
+std::cout << nums.empty(); // false，是否为空
+```
+
+这里的 `<int>` 是模板参数，表示“保存 `int` 类型的元素”。换个类型，就能保存其他数据：
+
+```
+std::vector<double> prices = {3.5, 8.8};
+std::vector<std::string> names = {"Alice", "Bob"};
+```
+
+这也是“标准**模板**库”中“模板”的含义：同一套容器实现可以用于不同的元素类型。
+
+访问元素时，要注意：
+
+```
+nums[100];     // 不检查边界，越界访问属于未定义行为
+nums.at(100); // 检查边界，越界会抛出 std::out_of_range 异常
+```
+
+遍历时，可以根据是否需要修改元素，选择不同写法：
+
+```
+// 复制每个元素，适合 int 这样的小对象
+for (int n : nums) {
+    std::cout << n << ' ';
+}
+
+// 引用原来的元素，可以直接修改
+for (int& n : nums) {
+    n *= 2;
+}
+
+// 只读引用，避免复制，常用于字符串等对象
+for (const std::string& name : names) {
+    std::cout << name << '\n';
+}
+```
+
+**2. 迭代器：连接容器与算法**
+
+迭代器可以先理解为“指向容器中某个位置的工具”。使用方式和指针有些相似：
+
+```
+std::vector<int> nums = {10, 20, 30};
+
+auto it = nums.begin();  // 指向第一个元素
+std::cout << *it;        // 10，* 表示访问对应元素
+
+++it;                   // 移动到下一个元素
+std::cout << *it;        // 20
+```
+
+`auto` 让编译器推导类型，这里的完整类型是：
+
+```
+std::vector<int>::iterator it = nums.begin();
+```
+
+STL 中，范围通常使用**左闭右开区间 `[begin, end)`**：
+
+```
+元素：       10      20      30      尾后位置
+             ↑                       ↑
+           begin()                 end()
+```
+
+`begin()` 指向第一个元素；`end()` 指向最后一个元素的**后面**，不能解引用。
+
+因此，完整遍历可以写成：
+
+```
+for (auto it = nums.begin(); it != nums.end(); ++it) {
+    std::cout << *it << ' ';
+}
+```
+
+空容器的 `begin() == end()`，所以这套写法同样适用。
+
+**3. 算法：把常见操作直接交给标准库**
+
+算法通常接收一对迭代器，表示要处理哪个范围。
+
+```
+#include <algorithm>
+#include <vector>
+
+std::vector<int> nums = {4, 2, 5, 2, 1};
+
+std::sort(nums.begin(), nums.end());
+// nums：1 2 2 4 5
+
+std::reverse(nums.begin(), nums.end());
+// nums：5 4 2 2 1
+
+auto count = std::count(nums.begin(), nums.end(), 2);
+// count：2
+```
+
+查找元素时，找不到会返回传入的范围终点：
+
+```
+auto it = std::find(nums.begin(), nums.end(), 4);
+
+if (it != nums.end()) {
+    std::cout << "找到了：" << *it << '\n';
+} else {
+    std::cout << "没找到\n";
+}
+```
+
+注意先判断，再使用 `*it`，因为 `end()` 不对应有效元素。
+
+排序也可以自定义规则，例如从大到小：
+
+```
+std::sort(nums.begin(), nums.end(), [](int a, int b) {
+    return a > b;
+});
+```
+
+这里的 `[](int a, int b) { ... }` 是 **lambda 表达式**，可以理解为一个临时的小函数。
+
+比较函数返回 `true`，表示 `a` 应排在 `b` 前面。这里用 `a > b`，因此得到降序结果；不要改成 `a >= b`，排序比较规则不能让元素与自己比较时也返回 `true`。
+
+**4. 其他常用容器怎么选？**
+
+| 容器            | 特点                               | 常见用途                       |
+| --------------- | ---------------------------------- | ------------------------------ |
+| `vector`        | 连续存储、下标访问快、末尾添加方便 | 普通列表，通常优先考虑         |
+| `deque`         | 支持快速在两端添加、删除           | 两端都要操作的序列             |
+| `list`          | 双向链表，不支持下标访问           | 已有位置迭代器时频繁插入、删除 |
+| `set`           | 元素唯一，按比较规则有序           | 去重、有序集合                 |
+| `map`           | 键唯一，按键有序，保存键值对       | 姓名对应分数                   |
+| `unordered_set` | 基于哈希，无排序保证               | 快速判断元素是否存在           |
+| `unordered_map` | 基于哈希，无排序保证               | 计数、键值查找                 |
+
+例如，`set` 会去重，并按默认的升序规则遍历：
+
+```
+#include <set>
+
+std::set<int> nums = {3, 1, 3, 2};
+
+nums.insert(4);
+nums.erase(2);
+
+for (int n : nums) {
+    std::cout << n << ' ';
+}
+// 输出：1 3 4
+```
+
+`map` 保存“键 → 值”的关系：
+
+```
+#include <map>
+#include <string>
+
+std::map<std::string, int> scores;
+
+scores["Alice"] = 90;
+scores["Bob"] = 85;
+scores["Alice"] = 95;  // 修改已有键对应的值
+
+for (const auto& [name, score] : scores) {  // C++17 结构化绑定
+    std::cout << name << ": " << score << '\n';
+}
+```
+
+有一个特别容易忽略的行为：**`map` 的 `[]` 在键不存在时会插入新元素。**
+
+```
+std::cout << scores["Tom"];  // 插入 {"Tom", 0}，然后输出 0
+```
+
+如果只是查询，不希望插入，可以用：
+
+```
+auto it = scores.find("Tom");
+
+if (it != scores.end()) {
+    std::cout << it->second; // first 是键，second 是值
+}
+```
+
+`map` 查找的复杂度为 `O(log n)`；`unordered_map` 平均为 `O(1)`，最坏为 `O(n)`。是否需要按键有序，是选择时的重要依据。
+
+**5. 栈和队列：限制访问方式的容器适配器**
+
+它们在底层容器上提供特定的操作接口。
+
+```
+#include <stack>
+#include <queue>
+
+std::stack<int> s;  // 栈：后进先出
+s.push(10);
+s.push(20);
+
+std::cout << s.top();  // 20
+s.pop();              // 删除 20，pop() 不返回元素
+std::queue<int> q;  // 队列：先进先出
+q.push(10);
+q.push(20);
+
+std::cout << q.front(); // 10
+q.pop();               // 删除 10
+```
+
+还有 `priority_queue`，默认每次优先取出最大的元素：
+
+```
+std::priority_queue<int> pq;
+
+pq.push(10);
+pq.push(30);
+pq.push(20);
+
+std::cout << pq.top();  // 30
+pq.pop();
+std::cout << pq.top();  // 20
+```
+
+调用 `top()`、`front()` 或 `pop()` 前，要保证容器非空。
+
+**6. 把容器和算法组合起来**
+
+下面是一个完整的“统计单词次数，再按照出现次数排序”的例子，使用 C++17：
+
+```
+#include <algorithm>
+#include <iostream>
+#include <string>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+int main() {
+    std::vector<std::string> words = {
+        "cpp", "java", "cpp", "python", "java", "cpp"
+    };
+
+    // 1. 用哈希表统计次数
+    std::unordered_map<std::string, int> counts;
+
+    for (const auto& word : words) {
+        ++counts[word];  // 首次访问时插入 0，然后自增
+    }
+
+    // 2. 复制到 vector，方便排序
+    std::vector<std::pair<std::string, int>> result(
+        counts.begin(), counts.end()
+    );
+
+    // 3. 次数降序；次数相同时，单词字典序升序
+    std::sort(result.begin(), result.end(),
+        [](const auto& a, const auto& b) {
+            if (a.second != b.second) {
+                return a.second > b.second;
+            }
+            return a.first < b.first;
+        }
+    );
+
+    // 4. 输出
+    for (const auto& [word, count] : result) {
+        std::cout << word << ": " << count << '\n';
+    }
+}
+```
+
+输出：
+
+```
+cpp: 3
+java: 2
+python: 1
+```
+
+这里先用适合计数的 `unordered_map`，再用适合排序的 `vector`。`std::sort` 要求随机访问迭代器，所以不能直接对 `unordered_map` 使用。
+
+**7. 初学时要留意迭代器失效**
+
+修改容器后，之前取得的迭代器不一定还能使用。例如，`vector` 扩容时可能把元素搬到新的内存位置：
+
+```
+std::vector<int> nums = {1, 2, 3};
+auto it = nums.begin();
+
+nums.push_back(4);  // 如果发生重新分配，原迭代器失效
+
+// 此时不能假定 *it 仍然有效
+```
+
+遍历过程中删除元素，应该使用 `erase()` 返回的新迭代器：
+
+```
+std::vector<int> nums = {1, 2, 3, 4, 5};
+
+for (auto it = nums.begin(); it != nums.end(); ) {
+    if (*it % 2 == 0) {
+        it = nums.erase(it);  // 返回被删除元素之后的位置
+    } else {
+        ++it;
+    }
+}
+// nums：1 3 5
+```
+
+学习顺序建议是：先熟练使用 `vector` 和范围 `for`，再理解迭代器与 `sort/find`，随后学习 `map/set` 和哈希容器。每学一种容器，都顺便弄清楚它的访问方式、常用操作复杂度，以及哪些操作会使迭代器失效。
+
+
+
+
 
