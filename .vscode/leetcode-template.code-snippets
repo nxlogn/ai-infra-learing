@@ -1,0 +1,33 @@
+{
+  "LeetCode C++ template": {
+    "prefix": "lc",
+    "body": [
+      "#include <bits/stdc++.h>",
+      "using namespace std;",
+      "",
+      "struct ListNode {",
+      "    int val;",
+      "    ListNode *next;",
+      "    ListNode() : val(0), next(nullptr) {}",
+      "    ListNode(int x) : val(x), next(nullptr) {}",
+      "    ListNode(int x, ListNode *next) : val(x), next(next) {}",
+      "};",
+      "",
+      "class Solution {",
+      "public:",
+      "    ${1:type} ${2:funcName}(${3:args}) {",
+      "        ${0}",
+      "        return ${4:result};",
+      "    }",
+      "};",
+      "",
+      "int main() {",
+      "    Solution solution;",
+      "    ${5}",
+      "    return 0;",
+      "}",
+      ""
+    ],
+    "description": "LeetCode C++ 标准解题模板"
+  }
+}

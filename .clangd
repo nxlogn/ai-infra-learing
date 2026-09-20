@@ -1,0 +1,5 @@
+If:
+  PathMatch: .*\.(cpp|cc|cxx|h|hpp|hxx)
+CompileFlags:
+  Compiler: C:/msys64/ucrt64/bin/g++.exe
+  Add: [-std=gnu++17]

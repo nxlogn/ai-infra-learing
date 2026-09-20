@@ -1,0 +1,10 @@
+[
+  {
+    "key": "alt+m",
+    "command": "editor.action.insertSnippet",
+    "when": "editorTextFocus && editorLangId == cpp",
+    "args": {
+      "snippet": "#include <bits/stdc++.h>\nusing namespace std;\n\nstruct ListNode {\n    int val;\n    ListNode *next;\n    ListNode() : val(0), next(nullptr) {}\n    ListNode(int x) : val(x), next(nullptr) {}\n    ListNode(int x, ListNode *next) : val(x), next(next) {}\n};\n\nclass Solution {\npublic:\n    ${1:type} ${2:funcName}(${3:args}) {\n        ${0}\n        return ${4:result};\n    }\n};\n\nint main() {\n    Solution solution;\n    ${5}\n    return 0;\n}\n"
+    }
+  }
+]
