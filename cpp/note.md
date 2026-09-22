@@ -4770,7 +4770,7 @@ STL（Standard Template Library，标准模板库）是 C++ 中一套用于**存
 
 比如，把一些整数排序：
 
-```
+```cpp
 #include <algorithm>
 #include <iostream>
 #include <vector>
@@ -4795,13 +4795,13 @@ int main() {
 
 普通数组创建后，长度固定：
 
-```
+```cpp
 int nums[3] = {10, 20, 30};
 ```
 
 `vector` 则能在运行过程中添加、删除元素：
 
-```
+```cpp
 std::vector<int> nums = {10, 20, 30};
 
 nums.push_back(40);  // 末尾添加：10 20 30 40
@@ -4816,7 +4816,7 @@ std::cout << nums.empty(); // false，是否为空
 
 这里的 `<int>` 是模板参数，表示“保存 `int` 类型的元素”。换个类型，就能保存其他数据：
 
-```
+```cpp
 std::vector<double> prices = {3.5, 8.8};
 std::vector<std::string> names = {"Alice", "Bob"};
 ```
@@ -4825,14 +4825,14 @@ std::vector<std::string> names = {"Alice", "Bob"};
 
 访问元素时，要注意：
 
-```
+```cpp
 nums[100];     // 不检查边界，越界访问属于未定义行为
 nums.at(100); // 检查边界，越界会抛出 std::out_of_range 异常
 ```
 
 遍历时，可以根据是否需要修改元素，选择不同写法：
 
-```
+```cpp
 // 复制每个元素，适合 int 这样的小对象
 for (int n : nums) {
     std::cout << n << ' ';
@@ -4853,7 +4853,7 @@ for (const std::string& name : names) {
 
 迭代器可以先理解为“指向容器中某个位置的工具”。使用方式和指针有些相似：
 
-```
+```cpp
 std::vector<int> nums = {10, 20, 30};
 
 auto it = nums.begin();  // 指向第一个元素
@@ -4865,13 +4865,13 @@ std::cout << *it;        // 20
 
 `auto` 让编译器推导类型，这里的完整类型是：
 
-```
+```cpp
 std::vector<int>::iterator it = nums.begin();
 ```
 
 STL 中，范围通常使用**左闭右开区间 `[begin, end)`**：
 
-```
+```cpp
 元素：       10      20      30      尾后位置
              ↑                       ↑
            begin()                 end()
@@ -4881,7 +4881,7 @@ STL 中，范围通常使用**左闭右开区间 `[begin, end)`**：
 
 因此，完整遍历可以写成：
 
-```
+```cpp
 for (auto it = nums.begin(); it != nums.end(); ++it) {
     std::cout << *it << ' ';
 }
@@ -4893,7 +4893,7 @@ for (auto it = nums.begin(); it != nums.end(); ++it) {
 
 算法通常接收一对迭代器，表示要处理哪个范围。
 
-```
+```cpp
 #include <algorithm>
 #include <vector>
 
@@ -4911,7 +4911,7 @@ auto count = std::count(nums.begin(), nums.end(), 2);
 
 查找元素时，找不到会返回传入的范围终点：
 
-```
+```cpp
 auto it = std::find(nums.begin(), nums.end(), 4);
 
 if (it != nums.end()) {
@@ -4925,7 +4925,7 @@ if (it != nums.end()) {
 
 排序也可以自定义规则，例如从大到小：
 
-```
+```cpp
 std::sort(nums.begin(), nums.end(), [](int a, int b) {
     return a > b;
 });
@@ -4949,7 +4949,7 @@ std::sort(nums.begin(), nums.end(), [](int a, int b) {
 
 例如，`set` 会去重，并按默认的升序规则遍历：
 
-```
+```cpp
 #include <set>
 
 std::set<int> nums = {3, 1, 3, 2};
@@ -4965,7 +4965,7 @@ for (int n : nums) {
 
 `map` 保存“键 → 值”的关系：
 
-```
+```cpp
 #include <map>
 #include <string>
 
@@ -4982,13 +4982,13 @@ for (const auto& [name, score] : scores) {  // C++17 结构化绑定
 
 有一个特别容易忽略的行为：**`map` 的 `[]` 在键不存在时会插入新元素。**
 
-```
+```cpp
 std::cout << scores["Tom"];  // 插入 {"Tom", 0}，然后输出 0
 ```
 
 如果只是查询，不希望插入，可以用：
 
-```
+```cpp
 auto it = scores.find("Tom");
 
 if (it != scores.end()) {
@@ -5002,7 +5002,7 @@ if (it != scores.end()) {
 
 它们在底层容器上提供特定的操作接口。
 
-```
+```cpp
 #include <stack>
 #include <queue>
 
@@ -5022,7 +5022,7 @@ q.pop();               // 删除 10
 
 还有 `priority_queue`，默认每次优先取出最大的元素：
 
-```
+```cpp
 std::priority_queue<int> pq;
 
 pq.push(10);
@@ -5040,7 +5040,7 @@ std::cout << pq.top();  // 20
 
 下面是一个完整的“统计单词次数，再按照出现次数排序”的例子，使用 C++17：
 
-```
+```cpp
 #include <algorithm>
 #include <iostream>
 #include <string>
@@ -5084,7 +5084,7 @@ int main() {
 
 输出：
 
-```
+```cpp
 cpp: 3
 java: 2
 python: 1
@@ -5096,7 +5096,7 @@ python: 1
 
 修改容器后，之前取得的迭代器不一定还能使用。例如，`vector` 扩容时可能把元素搬到新的内存位置：
 
-```
+```cpp
 std::vector<int> nums = {1, 2, 3};
 auto it = nums.begin();
 
@@ -5107,7 +5107,7 @@ nums.push_back(4);  // 如果发生重新分配，原迭代器失效
 
 遍历过程中删除元素，应该使用 `erase()` 返回的新迭代器：
 
-```
+```cpp
 std::vector<int> nums = {1, 2, 3, 4, 5};
 
 for (auto it = nums.begin(); it != nums.end(); ) {
@@ -5124,5 +5124,463 @@ for (auto it = nums.begin(); it != nums.end(); ) {
 
 
 
+# 互斥锁，原子操作，条件变量
 
+这四个概念可以串起来理解：
+
+- **多线程**：让多个执行流程并发工作。
+- **互斥锁**：保护共享数据，避免多个线程同时操作造成冲突。
+- **条件变量**：让线程等待某个条件成立，再继续执行。
+- **原子操作**：让某些简单操作不可分割地完成。
+
+下面以 C++17 为基础，用代码逐步说明。
+
+## **1. 多线程：一个程序中有多个执行流程**
+
+普通程序通常从 `main()` 开始，按顺序执行。使用 `std::thread` 可以启动另一个线程：
+
+```cpp
+#include <iostream>
+#include <thread>
+
+void work(int n) {
+    for (int i = 0; i < n; ++i) {
+        std::cout << "子线程：" << i << '\n';
+    }
+}
+
+int main() {
+    std::thread t(work, 3);  // 启动子线程，执行 work(3)
+
+    // 主线程可以在这里做其他事情
+
+    t.join();               // 等待子线程执行完毕
+    std::cout << "子线程已结束\n";
+}
+```
+
+执行关系可以理解为：
+
+```cpp
+主线程：启动 t ── 做其他事情 ── join 等待 ── 继续执行
+子线程：         work(3) ────────── 结束
+```
+
+“并发”不保证两个线程一定在同一时刻运行。操作系统负责调度，多核 CPU 上也可能真正并行执行。
+
+`join()` 的作用是等待，不是启动线程。线程在 `std::thread` 对象成功创建时就已开始参与调度。
+
+还要注意：**一个仍然可连接的 `std::thread` 对象被销毁，会调用 `std::terminate()` 终止程序。** 即使线程函数已经执行完，也需要 `join()` 或 `detach()`。
+
+```cpp
+t.join();    // 等待结束，适合这里的用法
+
+// t.detach(); // 脱离管理；需要自己保证所访问对象的生命周期
+```
+
+初学时优先使用 `join()`，不要为了省事随意 `detach()`。
+
+## **2. 为什么多线程需要同步？**
+
+线程可以访问同一份数据，但这也是问题来源：
+
+```cpp
+int count = 0;
+
+void work() {
+    for (int i = 0; i < 100000; ++i) {
+        ++count;
+    }
+}
+```
+
+假设两个线程同时执行 `work()`，直觉上最终应该是 `200000`。但 `++count` 并不是天然不可分割的操作，可以粗略看作：
+
+```cpp
+int temp = count;  // 读取
+temp = temp + 1;   // 计算
+count = temp;      // 写回
+```
+
+可能出现：
+
+```cpp
+线程 A 读取 count：0
+线程 B 读取 count：0
+线程 A 写回 count：1
+线程 B 写回 count：1
+```
+
+加了两次，却只增加了一次。
+
+更准确地说：**多个线程在没有适当同步的情况下，冲突访问同一个普通对象，且至少一个在写入，会产生数据竞争，导致未定义行为。** 不只是“结果偶尔算少”。
+
+## **3. 互斥锁：同一时间，只允许一个线程进入关键区域**
+
+`std::mutex` 用来保护共享数据：
+
+```cpp
+#include <iostream>
+#include <mutex>
+#include <thread>
+
+int count = 0;
+std::mutex mtx;
+
+void work() {
+    for (int i = 0; i < 100000; ++i) {
+        std::lock_guard<std::mutex> lock(mtx);
+        ++count;
+    } // 每轮结束时 lock 销毁，自动解锁
+}
+
+int main() {
+    std::thread t1(work);
+    std::thread t2(work);
+
+    t1.join();
+    t2.join();
+
+    std::cout << count << '\n';  // 200000
+}
+```
+
+这一段被锁保护的代码称为**临界区**：
+
+```cpp
+{
+    std::lock_guard<std::mutex> lock(mtx);
+    ++count;
+}
+```
+
+执行过程是：
+
+```cpp
+线程 A：获得锁 → 修改 count → 释放锁
+线程 B：等待锁 ───────────→ 获得锁 → 修改 count
+```
+
+`std::lock_guard` 利用了 C++ 的对象生命周期：
+
+- 构造时加锁。
+- 离开作用域时析构，自动解锁。
+- 即使中途抛异常，也能释放锁。
+
+因此通常不要手写：
+
+```cpp
+mtx.lock();
+++count;
+mtx.unlock();
+```
+
+如果中间提前 `return` 或发生异常，可能漏掉解锁。
+
+另外，**锁不会自动禁止别人访问变量**。所有可能并发发生的冲突访问，都必须遵守同一套同步规则：
+
+```cpp
+// 线程 A
+{
+    std::lock_guard<std::mutex> lock(mtx);
+    ++count;
+}
+
+// 线程 B
+std::cout << count;  // 如果与上面的写入并发，仍然有数据竞争
+```
+
+前面的完整示例中，主线程在两次 `join()` 后读取，此时工作线程已经结束，所以不需要再加锁。
+
+## **4. 条件变量：条件没满足时，先休眠等待**
+
+假设一个线程生产数据，另一个线程消费数据。
+
+消费者需要等到“数据准备好了”才能继续。如果反复检查：
+
+```cpp
+while (!ready) {
+    // 一直检查
+}
+```
+
+这会浪费 CPU；如果 `ready` 是未同步访问的普通变量，还会产生数据竞争。
+
+可以用 `std::condition_variable`：
+
+```cpp
+#include <condition_variable>
+#include <iostream>
+#include <mutex>
+#include <thread>
+
+std::mutex mtx;
+std::condition_variable cv;
+
+bool ready = false;
+int data = 0;
+
+void producer() {
+    {
+        std::lock_guard<std::mutex> lock(mtx);
+        data = 42;
+        ready = true;
+    } // 先解锁
+
+    cv.notify_one();  // 通知一个等待线程
+}
+
+void consumer() {
+    std::unique_lock<std::mutex> lock(mtx);
+
+    cv.wait(lock, [] {
+        return ready;
+    });
+
+    // 返回时已重新持有锁，且 ready 为 true
+    int value = data;
+    lock.unlock();
+
+    std::cout << "收到数据：" << value << '\n';
+}
+
+int main() {
+    std::thread c(consumer);
+    std::thread p(producer);
+
+    p.join();
+    c.join();
+}
+```
+
+理解重点是这句：
+
+```cpp
+cv.wait(lock, [] { return ready; });
+```
+
+它的行为是：
+
+1. 持有锁时检查 `ready`。
+2. 如果为 `false`，**原子地释放锁并进入等待**。
+3. 被唤醒后，重新获得锁。
+4. 再检查 `ready`；不满足就继续等，满足才返回。
+
+等待期间必须释放锁，否则生产者无法获得锁，也就没法把 `ready` 改成 `true`。
+
+这里用 `unique_lock`，因为它支持等待期间解锁、恢复时重新加锁；`lock_guard` 没有这种灵活性。
+
+```cpp
+std::lock_guard<std::mutex> lock(mtx); // 简单的作用域加锁
+std::unique_lock<std::mutex> lock(mtx); // 支持主动解锁、重新加锁
+```
+
+**为什么必须检查条件，不能只等通知？**
+
+因为线程可能发生**虚假唤醒**：即使没有相应通知，等待也可能被唤醒。
+
+而且，通知本身不保存“数据已经准备好”的状态：
+
+```cpp
+ready = true;    // 状态，由共享变量保存
+cv.notify_one(); // 通知等待者来检查状态
+```
+
+如果生产者先完成，消费者后执行，消费者会看到 `ready == true`，直接继续，不需要再等待一次通知。
+
+因此，推荐始终使用带条件判断的版本：
+
+```cpp
+cv.wait(lock, [] { return ready; });
+```
+
+常用通知方法：
+
+```cpp
+cv.notify_one(); // 唤醒一个等待线程
+cv.notify_all(); // 唤醒所有等待线程
+```
+
+被唤醒不等于立即执行；线程还需要获得锁、检查条件。
+
+## **5. 原子操作：保护简单的共享操作**
+
+如果只是一个共享计数器，用 `std::atomic` 更直接：
+
+```cpp
+#include <atomic>
+#include <iostream>
+#include <thread>
+
+std::atomic<int> count{0};
+
+void work() {
+    for (int i = 0; i < 100000; ++i) {
+        ++count;  // 原子的“读取—修改—写回”
+    }
+}
+
+int main() {
+    std::thread t1(work);
+    std::thread t2(work);
+
+    t1.join();
+    t2.join();
+
+    std::cout << count.load() << '\n';  // 200000
+}
+```
+
+常见操作：
+
+```cpp
+std::atomic<int> value{0};
+
+value.store(10);            // 原子写入
+int a = value.load();       // 原子读取
+int b = value.fetch_add(1); // 原子加 1，返回增加前的值
+int c = value.exchange(5); // 原子替换为 5，返回替换前的值
+```
+
+但要注意：**每一步是原子的，不代表多步组合也是原子的。**
+
+```cpp
+count.store(count.load() + 1);
+```
+
+这仍然是“先读取，再写入”两个独立操作。两个线程可能读取到同一个旧值，造成更新丢失。这里应使用：
+
+```cpp
+++count;
+// 或
+count.fetch_add(1);
+```
+
+同样，下面也不构成一个原子整体：
+
+```cpp
+if (count.load() > 0) {
+    --count;
+}
+```
+
+假设 `count` 为 `1`，两个线程都可能通过判断，然后都减一，最终得到 `-1`。
+
+这种“检查后修改”可以使用互斥锁，或者使用原子的比较交换操作：
+
+```cpp
+bool tryTakeOne(std::atomic<int>& stock) {
+    int current = stock.load();
+
+    while (current > 0) {
+        if (stock.compare_exchange_weak(current, current - 1)) {
+            return true;
+        }
+
+        // 失败时 current 会更新为本次比较观察到的实际值；
+        // weak 也允许虚假失败，因此放在循环中重试
+    }
+
+    return false;
+}
+```
+
+`compare_exchange_weak` 的意思是：只有 `stock` 仍等于预期的 `current`，才把它改成 `current - 1`，而且比较与修改整体不可分割。
+
+初学时先用默认内存顺序。**原子变量也不会自动保护旁边的普通变量**；涉及数据发布和内存顺序时，需要额外理解同步关系。此外，原子操作不保证所有类型、所有平台上都无锁，也不保证一定比互斥锁快。
+
+**6. 把线程、锁和条件变量组合：生产者与消费者**
+
+下面是一个完整例子：生产者把数字放入队列，消费者等待并取出，生产结束后安全退出。
+
+```cpp
+#include <condition_variable>
+#include <iostream>
+#include <mutex>
+#include <queue>
+#include <thread>
+
+std::queue<int> tasks;
+std::mutex mtx;
+std::condition_variable cv;
+bool finished = false;
+
+void producer() {
+    for (int i = 1; i <= 5; ++i) {
+        {
+            std::lock_guard<std::mutex> lock(mtx);
+            tasks.push(i);
+        }
+
+        cv.notify_one();
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(mtx);
+        finished = true;
+    }
+
+    cv.notify_all();
+}
+
+void consumer() {
+    while (true) {
+        int task;
+
+        {
+            std::unique_lock<std::mutex> lock(mtx);
+
+            cv.wait(lock, [] {
+                return !tasks.empty() || finished;
+            });
+
+            // 被唤醒后，如果没有任务且生产已结束，就退出
+            if (tasks.empty() && finished) {
+                break;
+            }
+
+            task = tasks.front();
+            tasks.pop();
+        } // 解锁
+
+        // 处理任务时不持有锁，生产者可以继续向队列添加数据
+        std::cout << "处理任务：" << task << '\n';
+    }
+}
+
+int main() {
+    std::thread p(producer);
+    std::thread c(consumer);
+
+    p.join();
+    c.join();
+}
+```
+
+这里各部分的职责很明确：
+
+| 工具                 | 在示例中的职责                       |
+| -------------------- | ------------------------------------ |
+| `thread`             | 分别运行生产者和消费者               |
+| `mutex`              | 保护队列和 `finished`                |
+| `condition_variable` | 没任务时等待，有任务或结束时唤醒     |
+| `atomic`             | 此处不需要，状态已由同一个互斥锁保护 |
+
+队列的检查与取出必须放在同一个临界区中：
+
+```cpp
+// 持有同一把锁
+task = tasks.front();
+tasks.pop();
+```
+
+否则在多个消费者场景下，检查完“非空”之后，任务可能已经被另一个消费者取走。
+
+最后，使用互斥锁时还要避免**死锁**。例如，一个线程拿着锁 A 等 B，另一个拿着 B 等 A，就会互相卡住。需要同时获取两把锁时，C++17 可以使用：
+
+```cpp
+std::scoped_lock lock(mutexA, mutexB);
+```
+
+日常选择可以遵循：**简单计数用原子；保护一组相关操作用锁；等待共享状态变化用条件变量，并用锁保护该状态。**
 
