@@ -1045,3 +1045,371 @@ print(discount_90(100))  # 90.0
 ```
 
 学习闭包时，重点抓住三件事：**内部函数访问外层变量；外层函数结束后绑定仍然可以保留；重新赋值外层变量时使用 `nonlocal`。**
+
+# 类，继承，特殊方法
+
+Python 中，**类**用于把数据和操作这些数据的方法组织在一起；**继承**让新类复用、扩展已有类；**特殊方法**让对象支持 `print()`、`len()`、`+` 等内置操作。
+
+先从一个简单的类开始，再逐步加入继承和特殊方法。
+
+## **1. 类和对象**
+
+类描述一种对象具有哪些属性、能做哪些事；实例是根据这个类创建的具体对象。
+
+```python
+class Student:
+    def __init__(self, name, score):
+        self.name = name
+        self.score = score
+
+    def introduce(self):
+        return f"我是{self.name}，成绩是{self.score}"
+```
+
+创建和使用实例：
+
+```python
+s1 = Student("小明", 90)
+s2 = Student("小红", 85)
+
+print(s1.name)         # 小明
+print(s2.score)        # 85
+print(s1.introduce())  # 我是小明，成绩是90
+
+s1.score = 95
+```
+
+这里：
+
+- `class Student`：定义类。
+- `Student(...)`：创建实例。
+- `self.name`、`self.score`：实例属性，每个学生分别保存自己的数据。
+- `introduce()`：实例方法。
+- `__init__()`：实例创建后执行的初始化方法。
+
+`self` 表示调用方法的那个实例。调用：
+
+```python
+s1.introduce()
+```
+
+可以理解为：
+
+```python
+Student.introduce(s1)
+```
+
+Python 自动把实例传给第一个参数。`self` 是约定名称，不是关键字，但应当遵守这个约定。
+
+## **2. 实例属性和类属性**
+
+实例属性属于各个实例；类属性定义在类中，可以由实例共同访问。
+
+```python
+class Student:
+    school = "第一中学"  # 类属性
+
+    def __init__(self, name):
+        self.name = name  # 实例属性
+a = Student("小明")
+b = Student("小红")
+
+print(a.name)         # 小明
+print(b.name)         # 小红
+print(Student.school) # 第一中学
+print(a.school)       # 第一中学
+```
+
+修改类属性：
+
+```python
+Student.school = "第二中学"
+
+print(a.school)  # 第二中学
+print(b.school)  # 第二中学
+```
+
+但通过实例赋值，通常会创建同名实例属性，遮住类属性：
+
+```python
+a.school = "实验中学"
+
+print(a.school)        # 实验中学
+print(b.school)        # 第二中学
+print(Student.school) # 第二中学
+```
+
+一个常见错误是把每个实例应当独立拥有的列表写成类属性：
+
+```python
+class Team:
+    members = []  # 所有实例访问的是同一个列表
+```
+
+如果希望各个队伍有自己的成员列表，应放进 `__init__`：
+
+```python
+class Team:
+    def __init__(self):
+        self.members = []
+```
+
+## **3. 继承：复用和扩展已有类**
+
+例如，狗和猫都属于动物：
+
+```python
+class Animal:
+    def __init__(self, name):
+        self.name = name
+
+    def speak(self):
+        return "发出声音"
+
+
+class Dog(Animal):
+    def speak(self):
+        return "汪汪"
+
+
+class Cat(Animal):
+    def speak(self):
+        return "喵喵"
+```
+
+`Dog(Animal)` 表示 `Dog` 继承 `Animal`。
+
+```python
+dog = Dog("旺财")
+
+print(dog.name)     # 旺财
+print(dog.speak())  # 汪汪
+```
+
+`Dog` 没有定义 `__init__`，因此使用继承来的初始化方法；它重新定义了 `speak()`，这叫作**方法重写**。
+
+可以检查继承关系：
+
+```python
+print(isinstance(dog, Dog))     # True
+print(isinstance(dog, Animal))  # True
+print(issubclass(Dog, Animal))  # True
+```
+
+## **4. 用 `super()` 扩展继承的方法**
+
+如果子类需要额外的初始化，可以调用已有的初始化逻辑：
+
+```python
+class Dog(Animal):
+    def __init__(self, name, breed):
+        super().__init__(name)
+        self.breed = breed
+
+    def speak(self):
+        return f"{self.name}：汪汪"
+dog = Dog("旺财", "柴犬")
+
+print(dog.name)   # 旺财
+print(dog.breed)  # 柴犬
+```
+
+如果子类定义了自己的 `__init__`，Python 不会自动再执行父类的 `__init__`，所以这里显式调用：
+
+```python
+super().__init__(name)
+```
+
+在单继承中，可以先把 `super()` 理解为访问父类的方法。更准确地说，它按**方法解析顺序（MRO）**继续查找方法，这对多继承尤其重要。
+
+Python 支持多继承：
+
+```python
+class C(A, B):
+    pass
+```
+
+可以通过 `C.__mro__` 查看方法查找顺序。初学时先掌握单继承即可。
+
+## **5. 多态：相同操作，不同表现**
+
+不同对象可以提供同名方法：
+
+```python
+animals = [
+    Dog("旺财", "柴犬"),
+    Cat("咪咪"),
+]
+
+for animal in animals:
+    print(animal.speak())
+```
+
+输出：
+
+```
+旺财：汪汪
+喵喵
+```
+
+调用方只需要调用 `speak()`，具体行为由对象决定。
+
+Python 也不强制这些对象必须继承同一个类：
+
+```python
+class Robot:
+    def speak(self):
+        return "你好，人类"
+
+
+def make_sound(obj):
+    print(obj.speak())
+
+
+make_sound(Robot())  # 你好，人类
+```
+
+这种关注“对象能做什么”的方式，常被称为**鸭子类型**。
+
+## **6. 特殊方法：让对象支持 Python 的通用操作**
+
+特殊方法通常以双下划线开头和结尾，例如 `__init__`、`__len__`。
+
+你在类中定义它们，Python 会在对应操作发生时调用。
+
+| 特殊方法       | 对应操作                    | 作用                   |
+| -------------- | --------------------------- | ---------------------- |
+| `__init__`     | `MyClass(...)` 的初始化阶段 | 初始化实例             |
+| `__str__`      | `str(obj)`、`print(obj)`    | 提供易读的字符串       |
+| `__repr__`     | `repr(obj)`                 | 提供适合调试的表示     |
+| `__len__`      | `len(obj)`                  | 返回长度               |
+| `__getitem__`  | `obj[key]`                  | 支持索引、切片或键访问 |
+| `__iter__`     | `iter(obj)`、`for`          | 返回迭代器             |
+| `__contains__` | `x in obj`                  | 成员判断               |
+| `__eq__`       | `a == b`                    | 判断相等               |
+| `__add__`      | `a + b`                     | 定义加法               |
+| `__call__`     | `obj(...)`                  | 让实例可以被调用       |
+
+通常使用右侧的常规语法即可，例如写 `len(obj)`。
+
+**7. `__str__` 和 `__repr__`**
+
+```python
+class Student:
+    def __init__(self, name, score):
+        self.name = name
+        self.score = score
+
+    def __str__(self):
+        return f"{self.name}：{self.score}分"
+
+    def __repr__(self):
+        return f"Student(name={self.name!r}, score={self.score!r})"
+s = Student("小明", 90)
+
+print(s)        # 小明：90分
+print(repr(s))  # Student(name='小明', score=90)
+print([s])      # [Student(name='小明', score=90)]
+```
+
+- `__str__` 侧重方便阅读。
+- `__repr__` 侧重调试，尽量清楚、明确。
+- 两者都必须返回字符串。
+- 如果没有定义 `__str__`，默认实现会使用 `__repr__`。
+
+`!r` 表示在格式化时使用 `repr()`，所以字符串会带上引号。
+
+## **8. 用特殊方法实现一个小容器**
+
+```python
+class BookShelf:
+    def __init__(self, books):
+        self.books = list(books)
+
+    def __len__(self):
+        return len(self.books)
+
+    def __getitem__(self, index):
+        return self.books[index]
+
+    def __iter__(self):
+        return iter(self.books)
+
+    def __contains__(self, book):
+        return book in self.books
+```
+
+现在这个类的实例就可以支持熟悉的容器操作：
+
+```python
+shelf = BookShelf(["Python入门", "算法基础", "计算机网络"])
+
+print(len(shelf))            # 3
+print(shelf[0])              # Python入门
+print(shelf[:2])             # ['Python入门', '算法基础']
+print("算法基础" in shelf)   # True
+
+for book in shelf:
+    print(book)
+```
+
+这里 `shelf[:2]` 会把一个 `slice` 对象传给 `__getitem__`。因为内部列表本身支持切片，所以直接转交给它即可。
+
+## **9. 用 `__add__` 和 `__eq__` 定义运算**
+
+例如二维向量：
+
+```python
+class Vector:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+    def __add__(self, other):
+        if not isinstance(other, Vector):
+            return NotImplemented
+        return Vector(self.x + other.x, self.y + other.y)
+
+    def __eq__(self, other):
+        if not isinstance(other, Vector):
+            return NotImplemented
+        return self.x == other.x and self.y == other.y
+
+    def __repr__(self):
+        return f"Vector({self.x}, {self.y})"
+a = Vector(1, 2)
+b = Vector(3, 4)
+
+print(a + b)                # Vector(4, 6)
+print(a == Vector(1, 2))    # True
+print(a is Vector(1, 2))    # False
+```
+
+这里：
+
+- `==` 使用自定义的相等规则。
+- `is` 判断是不是同一个对象，不能通过 `__eq__` 改写。
+- `NotImplemented` 表示当前方法不支持这组操作数，让 Python 尝试其他适用的处理方式。它与 `NotImplementedError` 异常不同。
+
+## **10. `__call__` 与之前的闭包联系起来**
+
+之前用闭包实现过计数器，也可以用类实现：
+
+```python
+class Counter:
+    def __init__(self):
+        self.count = 0
+
+    def __call__(self):
+        self.count += 1
+        return self.count
+counter = Counter()
+
+print(counter())  # 1
+print(counter())  # 2
+print(counter())  # 3
+```
+
+`counter` 是实例，但定义了 `__call__` 后，就能像函数一样调用。这里状态保存在 `self.count` 中；闭包版本则把状态保存在外层函数的变量中。
+
+当状态简单、主要提供一个操作时，闭包通常很方便；当需要管理多个属性、提供多个相关操作时，类通常更容易组织。
