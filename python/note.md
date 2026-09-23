@@ -764,3 +764,284 @@ print(names)  # ['小明', '小刚']
 1. `students[:3]`：**切片**，取前三条记录。
 2. `name, score`：**解包**，将每条记录拆成姓名和成绩。
 3. `[name ... if score >= 60]`：**推导式**，筛选及格记录并收集姓名。
+
+# 闭包
+
+Python 的**闭包（closure）**，指的是：**内部函数使用了外层函数的变量，即使外层函数已经执行结束，内部函数仍然能访问这些变量。**
+
+可以先把它理解成：**函数带着它需要的外部环境一起被保留下来。**
+
+## 1. 从一个例子开始
+
+```python
+def make_adder(n):
+    def add(x):
+        return x + n
+
+    return add
+```
+
+调用它：
+
+```python
+add_five = make_adder(5)
+
+print(add_five(3))  # 8
+print(add_five(10)) # 15
+```
+
+执行过程是：
+
+1. `make_adder(5)` 中，`n` 为 `5`。
+2. 定义内部函数 `add`，它使用了外层的变量 `n`。
+3. `return add` 返回函数对象，注意这里没有 `()`。
+4. 外层函数结束后，返回的 `add` 仍然能够访问 `n`。
+
+因此，`add_five(3)` 相当于计算 `3 + 5`。
+
+每次调用外层函数，都可以创建独立的环境：
+
+```python
+add_five = make_adder(5)
+add_ten = make_adder(10)
+
+print(add_five(2))  # 7
+print(add_ten(2))   # 12
+```
+
+**闭包保留的是变量的绑定，并不是简单地把当时的值复制进函数。** 这一点在后面的循环例子里很重要。
+
+## 2. 闭包与变量作用域
+
+Python 查找变量时，一般按 **LEGB** 顺序：
+
+| 层级      | 含义                            |
+| --------- | ------------------------------- |
+| Local     | 当前函数的局部作用域            |
+| Enclosing | 外层嵌套函数的作用域            |
+| Global    | 当前模块的全局作用域            |
+| Built-in  | 内置作用域，例如 `len`、`print` |
+
+在前面的例子中：
+
+```python
+def make_adder(n):
+    def add(x):
+        return x + n
+    return add
+```
+
+- `x` 是 `add` 的局部变量。
+- `n` 来自外层函数作用域，对于 `add` 来说是**自由变量**。
+- `add` 通过闭包保留对 `n` 的访问。
+
+仅仅访问全局变量，一般不称为闭包：
+
+```python
+n = 5
+
+def add(x):
+    return x + n  # 查找的是全局变量
+```
+
+## 3. 修改外层变量：`nonlocal`
+
+闭包不仅可以读取外层变量，还可以保存不断变化的状态。例如计数器：
+
+```python
+def make_counter():
+    count = 0
+
+    def counter():
+        nonlocal count
+        count += 1
+        return count
+
+    return counter
+```
+
+使用：
+
+```python
+counter = make_counter()
+
+print(counter())  # 1
+print(counter())  # 2
+print(counter())  # 3
+```
+
+这里的：
+
+```
+nonlocal count
+```
+
+表示：**`count` 使用外层函数中已有的绑定，不要把它当作当前函数的新局部变量。**
+
+如果不写：
+
+```python
+def make_counter():
+    count = 0
+
+    def counter():
+        count += 1
+        return count
+
+    return counter
+```
+
+调用 `counter()` 时会报 `UnboundLocalError`。
+
+因为 `count += 1` 包含赋值，Python 会把 `count` 当成内部函数的局部变量，但加一之前，它还没有被赋值。
+
+可以这样区分：
+
+- `nonlocal`：重新绑定外层函数中的变量。
+- `global`：重新绑定模块级的全局变量。
+
+## 4. 修改对象，不一定需要 `nonlocal`
+
+如果只是修改外层变量指向的可变对象，没有给变量重新赋值，就不需要 `nonlocal`：
+
+```python
+def make_collector():
+    items = []
+
+    def collect(value):
+        items.append(value)
+        return items.copy()
+
+    return collect
+collect = make_collector()
+
+print(collect("苹果"))  # ['苹果']
+print(collect("香蕉"))  # ['苹果', '香蕉']
+```
+
+这里 `items.append(value)` 修改的是列表本身，没有重新绑定 `items`。
+
+对比：
+
+```python
+items.append(value)       # 修改对象，不需要 nonlocal
+items = items + [value]   # 重新赋值，需要 nonlocal
+```
+
+注意，`items += [value]` 也包含赋值操作，因此在这种情况下同样需要声明 `nonlocal items`。
+
+## 5. 同一次调用创建的闭包可以共享状态
+
+```python
+def make_account():
+    balance = 0
+
+    def deposit(amount):
+        nonlocal balance
+        balance += amount
+
+    def get_balance():
+        return balance
+
+    return deposit, get_balance
+deposit, get_balance = make_account()
+
+deposit(100)
+deposit(50)
+
+print(get_balance())  # 150
+```
+
+`deposit` 和 `get_balance` 来自同一次 `make_account()` 调用，共享同一个 `balance`。
+
+再次调用 `make_account()`，则会得到另一份独立的状态。
+
+## 6. 常见陷阱：循环中的闭包
+
+看这个例子：
+
+```python
+def make_functions():
+    funcs = []
+
+    for i in range(3):
+        funcs.append(lambda: i)
+
+    return funcs
+
+
+funcs = make_functions()
+print([f() for f in funcs])  # [2, 2, 2]
+```
+
+为什么不是 `[0, 1, 2]`？
+
+因为这三个函数使用的是**同一个外层变量 `i`**。调用它们时，循环已经结束，`i` 的值是 `2`。
+
+这叫作**延迟绑定**：使用自由变量的值发生在函数执行时，而不是创建函数时。
+
+#### 方法一：使用默认参数固定每次的值
+
+```python
+def make_functions():
+    funcs = []
+
+    for i in range(3):
+        funcs.append(lambda i=i: i)
+
+    return funcs
+
+
+print([f() for f in make_functions()])  # [0, 1, 2]
+```
+
+`lambda i=i: i` 中：
+
+- 左边的 `i` 是函数参数。
+- 右边的 `i` 是创建函数时的外层变量值。
+- 默认参数在函数创建时求值。
+
+这里通过默认参数保存了当时的值，函数体中的 `i` 已经是局部参数。
+
+#### 方法二：每次调用工厂函数，创建独立绑定
+
+```python
+def make_value(value):
+    def get_value():
+        return value
+    return get_value
+
+
+funcs = [make_value(i) for i in range(3)]
+
+print([f() for f in funcs])  # [0, 1, 2]
+```
+
+每次 `make_value(i)` 都创建一个独立的 `value`，所以不会共享同一个循环变量。
+
+## 7. 闭包有什么用？
+
+闭包常用于：
+
+- **定制函数**：例如创建“加 5”“乘 10”的函数。
+- **保存状态**：例如计数器、缓存。
+- **装饰器**：包装一个函数，同时保留对原函数的访问。
+- **回调函数**：让回调保留执行时需要的上下文。
+
+例如创建不同折扣的计算函数：
+
+```python
+def make_discount(rate):
+    def calculate(price):
+        return price * rate
+    return calculate
+
+
+discount_80 = make_discount(0.8)
+discount_90 = make_discount(0.9)
+
+print(discount_80(100))  # 80.0
+print(discount_90(100))  # 90.0
+```
+
+学习闭包时，重点抓住三件事：**内部函数访问外层变量；外层函数结束后绑定仍然可以保留；重新赋值外层变量时使用 `nonlocal`。**
