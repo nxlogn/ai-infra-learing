@@ -616,3 +616,151 @@ if not tasks:
 
 这比写 `if len(tasks) == 0:` 更简洁，也是常见的 Python 写法。
 
+# 推导式
+
+## 列表推导式
+
+基本格式：
+
+```python
+[表达式 for 变量 in 可迭代对象]
+```
+
+例如，计算每个数字的平方：
+
+```python
+squares = [x ** 2 for x in range(5)]
+print(squares)  # [0, 1, 4, 9, 16]
+```
+
+等价于：
+
+```python
+squares = []
+
+for x in range(5):
+    squares.append(x ** 2)
+```
+
+可以按这个顺序理解：**遍历数据 → 计算表达式 → 收集结果**。
+
+## 加上筛选条件
+
+```python
+[表达式 for 变量 in 可迭代对象 if 条件]
+```
+
+例如，只保留偶数的平方：
+
+```python
+nums = [1, 2, 3, 4, 5, 6]
+
+result = [x ** 2 for x in nums if x % 2 == 0]
+print(result)  # [4, 16, 36]
+```
+
+这里先判断条件，条件成立才计算并收集结果。
+
+## 区分“筛选”和“条件表达式”
+
+**末尾的 `if` 用于筛选，可能减少元素数量：**
+
+```python
+result = [x for x in range(5) if x % 2 == 0]
+print(result)  # [0, 2, 4]
+```
+
+**前面的 `if ... else ...` 用于决定每个元素生成什么值：**
+
+```python
+result = ["偶数" if x % 2 == 0 else "奇数" for x in range(5)]
+print(result)  # ['偶数', '奇数', '偶数', '奇数', '偶数']
+```
+
+第二个例子没有过滤，每个输入都对应一个输出。
+
+## 字典推导式和集合推导式
+
+字典推导式需要生成键和值：
+
+```python
+squares = {x: x ** 2 for x in range(4)}
+print(squares)  # {0: 0, 1: 1, 2: 4, 3: 9}
+```
+
+集合推导式会自动去重：
+
+```python
+remainders = {x % 3 for x in range(10)}
+print(remainders)  # 包含 0、1、2，顺序不保证
+```
+
+## 多层循环的推导式
+
+例如，把二维列表展开成一维列表：
+
+```python
+matrix = [
+    [1, 2, 3],
+    [4, 5, 6],
+]
+
+flat = [value for row in matrix for value in row]
+print(flat)  # [1, 2, 3, 4, 5, 6]
+```
+
+多个 `for` 的顺序与普通嵌套循环一致：
+
+```python
+flat = []
+
+for row in matrix:
+    for value in row:
+        flat.append(value)
+```
+
+推导式太长、条件太复杂时，普通循环通常更容易读。
+
+## 圆括号得到的是生成器
+
+```python
+numbers = (x ** 2 for x in range(3))
+```
+
+这不是“元组推导式”，而是**生成器表达式**。它按需计算，不会立即生成完整列表：
+
+```python
+print(next(numbers))  # 0
+print(next(numbers))  # 1
+print(next(numbers))  # 4
+```
+
+生成器用完后就耗尽了。如果需要元组，可以显式转换：
+
+```python
+numbers = tuple(x ** 2 for x in range(3))
+print(numbers)  # (0, 1, 4)
+```
+
+## 4. 把三者放在一起
+
+假设有一组学生成绩，要取前三名记录，并找出其中及格的学生姓名：
+
+```python
+students = [
+    ("小明", 90),
+    ("小红", 55),
+    ("小刚", 80),
+    ("小丽", 95),
+]
+
+names = [name for name, score in students[:3] if score >= 60]
+
+print(names)  # ['小明', '小刚']
+```
+
+这一行包含了三个动作：
+
+1. `students[:3]`：**切片**，取前三条记录。
+2. `name, score`：**解包**，将每条记录拆成姓名和成绩。
+3. `[name ... if score >= 60]`：**推导式**，筛选及格记录并收集姓名。
