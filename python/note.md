@@ -1413,3 +1413,1255 @@ print(counter())  # 3
 `counter` 是实例，但定义了 `__call__` 后，就能像函数一样调用。这里状态保存在 `self.count` 中；闭包版本则把状态保存在外层函数的变量中。
 
 当状态简单、主要提供一个操作时，闭包通常很方便；当需要管理多个属性、提供多个相关操作时，类通常更容易组织。
+
+# 可变对象，引用，浅拷贝和深拷贝
+
+理解这几个概念，关键是先记住：**Python 的变量绑定到对象；赋值通常不会复制对象。**
+
+例如：
+
+```python
+a = [1, 2, 3]
+b = a
+```
+
+此时不是创建了两个列表，而是两个变量引用同一个列表：
+
+```python
+a ──┐
+    ├──> [1, 2, 3]
+b ──┘
+```
+
+下面从这个关系逐步展开。
+
+## **1. 可变对象与不可变对象**
+
+“可变”指的是：**对象创建后，能否修改它本身的内容。**
+
+| 类型                        | 是否可变 |
+| --------------------------- | -------- |
+| `list`、`dict`、`set`       | 可变     |
+| `int`、`float`、`bool`      | 不可变   |
+| `str`、`tuple`、`frozenset` | 不可变   |
+
+列表可以原地修改：
+
+```python
+a = [1, 2, 3]
+a.append(4)
+a[0] = 99
+
+print(a)  # [99, 2, 3, 4]
+```
+
+字符串不能原地修改：
+
+```python
+s = "hello"
+
+# s[0] = "H"  # TypeError
+s = "Hello"  # 可以：让变量 s 绑定到另一个字符串
+```
+
+这里要区分两件事：
+
+- **修改对象**：对象还是原来那个，内容变了。
+- **重新赋值**：变量改为引用另一个对象。
+
+不可变限制的是对象，不是变量能否重新赋值。
+
+## **2. 引用：多个变量可以指向同一个对象**
+
+```python
+a = [1, 2]
+b = a
+
+b.append(3)
+
+print(a)  # [1, 2, 3]
+print(b)  # [1, 2, 3]
+```
+
+通过 `b` 修改列表，`a` 也能看到，因为它们访问同一个对象。
+
+但给 `b` 重新赋值，不会改变 `a` 的绑定：
+
+```python
+a = [1, 2]
+b = a
+
+b = [8, 9]
+
+print(a)  # [1, 2]
+print(b)  # [8, 9]
+```
+
+重新赋值之后：
+
+```python
+a ──> [1, 2]
+b ──> [8, 9]
+```
+
+不可变对象也可以被多个变量引用，只是不能原地修改：
+
+```python
+a = 10
+b = a
+
+b = b + 1
+
+print(a)  # 10
+print(b)  # 11
+```
+
+`b + 1` 得到一个结果对象，再把 `b` 绑定到它；整数 `10` 本身没有变化。
+
+## **3. `==` 与 `is`：值相等和同一个对象**
+
+```python
+a = [1, 2]
+b = [1, 2]
+c = a
+
+print(a == b)  # True：列表内容相等
+print(a is b)  # False：不是同一个列表
+print(a is c)  # True：引用同一个列表
+```
+
+- `==`：按类型定义的规则比较是否相等。
+- `is`：判断是否为同一个对象。
+
+判断数字或字符串的值是否相等，使用 `==`。判断是否为 `None`，通常使用：
+
+```python
+if value is None:
+    print("没有值")
+```
+
+不要依赖某些整数或字符串可能被复用的现象来使用 `is` 比较值。
+
+## **4. 浅拷贝：复制外层，内部对象仍然共享**
+
+先看一个简单列表：
+
+```python
+a = [1, 2, 3]
+b = a.copy()
+
+print(a is b)  # False
+
+b.append(4)
+print(a)      # [1, 2, 3]
+print(b)      # [1, 2, 3, 4]
+```
+
+`a.copy()` 创建了一个新的外层列表。
+
+但是，**新列表里的元素仍然引用原来的那些对象**。嵌套列表能清楚地体现这一点：
+
+```python
+a = [[1, 2], [3, 4]]
+b = a.copy()
+
+print(a is b)        # False：外层列表不同
+print(a[0] is b[0])  # True：内部列表相同
+```
+
+关系可以表示为：
+
+```
+a ──> 外层列表 A ──┬──> 内部列表 [1, 2]
+                  └──> 内部列表 [3, 4]
+                         ↑       ↑
+b ──> 外层列表 B ─────────┴───────┘
+```
+
+所以修改内部列表会互相影响：
+
+```python
+b[0].append(99)
+
+print(a)  # [[1, 2, 99], [3, 4]]
+print(b)  # [[1, 2, 99], [3, 4]]
+```
+
+但替换 `b` 中的某个元素，只影响 `b` 的外层列表：
+
+```python
+b[0] = ["新列表"]
+
+print(a)  # [[1, 2, 99], [3, 4]]
+print(b)  # [['新列表'], [3, 4]]
+```
+
+这两种操作的区别是：
+
+```python
+b[0].append(99)  # 修改共享的内部对象
+b[0] = [...]    # 修改 b 的外层列表，让它引用另一个对象
+```
+
+常见的浅拷贝写法：
+
+```
+b = a.copy()       # 列表、字典、集合等提供的方法
+b = a[:]          # 列表的完整切片
+b = list(a)       # 从已有列表创建新列表
+
+import copy
+b = copy.copy(a)  # 通用的浅拷贝函数
+```
+
+## **5. 深拷贝：递归复制内部内容**
+
+如果希望嵌套的可变对象也独立，可以使用 `copy.deepcopy()`：
+
+```python
+import copy
+
+a = [[1, 2], [3, 4]]
+b = copy.deepcopy(a)
+
+print(a is b)        # False
+print(a[0] is b[0])  # False
+
+b[0].append(99)
+
+print(a)  # [[1, 2], [3, 4]]
+print(b)  # [[1, 2, 99], [3, 4]]
+```
+
+字典嵌套列表也是一样：
+
+```python
+original = {
+    "name": "小明",
+    "scores": [80, 90],
+}
+
+shallow = copy.copy(original)
+deep = copy.deepcopy(original)
+
+original["scores"].append(100)
+
+print(shallow["scores"])  # [80, 90, 100]
+print(deep["scores"])     # [80, 90]
+```
+
+深拷贝不意味着所有对象都必须创建新实例。整数、字符串等不可变对象通常可以复用；自定义对象也可以控制自己的拷贝行为。
+
+## **6. 三种操作放在一起比较**
+
+对于一个包含内部列表的列表 `a`：
+
+| 操作                   | 外层列表是否新建 | 内部列表是否共享         |
+| ---------------------- | ---------------- | ------------------------ |
+| `b = a`                | 否               | 是，整个对象都共享       |
+| `b = copy.copy(a)`     | 是               | 是                       |
+| `b = copy.deepcopy(a)` | 是               | 与原对象的内部列表不共享 |
+
+深拷贝还有一个容易忽略的细节：**它通常会保留原对象内部的共享关系。**
+
+```python
+import copy
+
+inner = [1, 2]
+a = [inner, inner]
+
+b = copy.deepcopy(a)
+
+print(b[0] is inner)  # False：已经复制了内部列表
+print(b[0] is b[1])   # True：副本内部仍然共享同一个列表
+```
+
+因此深拷贝后，修改 `b[0]` 仍会影响 `b[1]`，但不会影响原来的 `inner`。
+
+## **7. 函数参数也遵循相同规则**
+
+把列表传入函数时，不会自动复制：
+
+```python
+def add_item(items):
+    items.append(3)
+
+nums = [1, 2]
+add_item(nums)
+
+print(nums)  # [1, 2, 3]
+```
+
+调用时，参数 `items` 和变量 `nums` 引用同一个列表。
+
+但重新绑定参数，不会让调用方变量跟着改变：
+
+```python
+def replace(items):
+    items = [8, 9]
+
+nums = [1, 2]
+replace(nums)
+
+print(nums)  # [1, 2]
+```
+
+所以理解函数传参时，关注函数里做的是**修改对象**还是**重新绑定参数**，比简单记“传值”或“传引用”更准确。
+
+## **8. 三个常见陷阱**
+
+**① `+=` 对不同类型可能有不同效果**
+
+列表的 `+=` 通常原地修改：
+
+```python
+a = [1, 2]
+b = a
+
+a += [3]
+
+print(b)  # [1, 2, 3]
+```
+
+列表的 `+` 创建新列表，再赋值：
+
+```python
+a = [1, 2]
+b = a
+
+a = a + [3]
+
+print(a)  # [1, 2, 3]
+print(b)  # [1, 2]
+```
+
+因此，涉及可变对象时，`a += b` 和 `a = a + b` 不一定具有相同的共享影响。
+
+**② 用列表乘法创建二维列表**
+
+```python
+matrix = [[0] * 3] * 2
+
+matrix[0][0] = 99
+
+print(matrix)
+# [[99, 0, 0], [99, 0, 0]]
+```
+
+外层的 `* 2` 重复了对同一个内部列表的引用。
+
+要创建独立的每一行，可以使用推导式：
+
+```python
+matrix = [[0] * 3 for _ in range(2)]
+
+matrix[0][0] = 99
+
+print(matrix)
+# [[99, 0, 0], [0, 0, 0]]
+```
+
+**③ 可变默认参数会被重复使用**
+
+```python
+def collect(value, items=[]):
+    items.append(value)
+    return items
+
+print(collect(1))  # [1]
+print(collect(2))  # [1, 2]
+```
+
+默认参数只在函数定义时求值一次，两个调用使用同一个列表。
+
+如果希望每次省略参数时都创建新列表：
+
+```python
+def collect(value, items=None):
+    if items is None:
+        items = []
+
+    items.append(value)
+    return items
+
+print(collect(1))  # [1]
+print(collect(2))  # [2]
+```
+
+实际选择时，如果需要共享状态就直接赋值；只需要独立增删外层元素时用浅拷贝；需要独立修改嵌套数据时再考虑深拷贝。
+
+# 模块，包，虚拟环境，依赖管理
+
+## 1. 模块（Module）—— 一个 `.py` 文件
+
+模块就是**任何一个 `.py` 文件**，用来把代码拆分、复用。
+
+```python
+# utils.py —— 这是一个模块
+def add(x, y):
+    return x + y
+
+PI = 3.14159
+```
+
+```python
+# main.py —— 导入使用
+import utils            # 导入整个模块
+utils.add(1, 2)
+
+from utils import add   # 只导入某个成员
+add(1, 2)
+
+import utils as u       # 起别名
+u.PI
+```
+
+**关键机制——`__name__`：**
+
+```python
+# utils.py
+if __name__ == "__main__":
+    print("直接运行才会执行")
+```
+
+- 直接运行 `python utils.py` → `__name__` 是 `"__main__"`，打印
+- 被 `import utils` → `__name__` 是 `"utils"`，不打印
+
+这就是为什么每个脚本都建议写这个判断：**模块可以被导入，也可以直接运行，两种行为要分开**。
+
+Python 运行时会在 `sys.path` 列出的路径中搜索模块，优先级大致是：**当前目录 → 环境变量 `PYTHONPATH` → 安装的第三方包 → 标准库**。
+
+## 2. 包（Package）—— 带目录结构的模块集合
+
+包就是**包含 `__init__.py` 的文件夹**，用于组织大量模块。
+
+```
+myproject/
+├── myapp/                  ← 包
+│   ├── __init__.py         ← 包的"标记"（可为空）
+│   ├── core.py             ← 模块 myapp.core
+│   └── utils/              ← 子包 myapp.utils
+│       ├── __init__.py
+│       └── text.py         ← 模块 myapp.utils.text
+└── main.py
+```
+
+```python
+from myapp import core                  # 导入模块
+from myapp.utils.text import clean      # 导入深层成员
+from myapp.core import *                # 不推荐：污染命名空间
+```
+
+**`__init__.py` 的作用：**
+
+- 标记目录为包（Python 3.3+ 有 namespace package 的宽松模式，但显式写上仍是惯例）
+- 控制导入行为，可以在这里做“接口整理”：
+
+```python
+# myapp/__init__.py
+from myapp.core import add   # 让外部直接 from myapp import add
+```
+
+> 相对导入：包内部用 `from . import core`（`.` 表示当前包），`from .. import x` 表示上级包。相对导入只能在被导入时用，不能直接运行包内的文件。
+
+## 3. 虚拟环境（Virtual Environment）—— 隔离的 Python 运行空间
+
+**为什么需要它？** 全局安装的包是所有项目共享的：
+
+- 项目 A 要 `requests==2.25`，项目 B 要 `requests==2.31` → 冲突
+- 装太多包污染系统 Python，卸载困难
+
+**解决方案：** 给每个项目一个独立的、可随时删除重建的 Python 环境。
+
+```bash
+# Windows 下创建虚拟环境
+python -m venv .venv
+
+# 激活（PowerShell）
+.venv\Scripts\Activate.ps1
+
+# 激活（CMD）
+.venv\Scripts\activate.bat
+
+# 激活后命令行前面会出现 (.venv) 标记
+# 此时 pip 安装的一切都只进这个目录，退出/删除目录即干净卸载
+(.venv) pip install requests    # 装进 .venv，不碰全局
+
+# 退出虚拟环境
+deactivate
+```
+
+**原理一句话：** 激活脚本只是修改了当前会话的 `PATH`，让 `python` 和 `pip` 指向 `.venv` 目录里的副本。虚拟环境不是复制整个 Python，而是轻量的目录 + 链接（Windows 下会复制一份 python.exe）。
+
+**现代替代方案：** 如果用 VS Code，右下角选择解释器时直接指向 `.venv` 即可，终端会自动激活。社区目前也流行 `uv`（Rust 编写，速度快几十倍）：
+
+```bash
+uv venv          # 创建
+uv add requests  # 装包 + 自动管理依赖
+```
+
+## 4. 依赖管理 —— 让环境可复现
+
+虚拟环境解决了“隔离”，但还有问题：**换一台电脑怎么重建一模一样的环境？** 这就需要把依赖清单化。
+
+**核心工具链（pip + requirements.txt）：**
+
+```bash
+# 安装第三方包（从 PyPI 下载）
+pip install requests
+
+# 导出当前环境的所有依赖及精确版本
+pip freeze > requirements.txt
+
+# 输出形如：
+# requests==2.31.0
+# urllib3==2.0.7
+# certifi==2023.11.17
+# ...（连间接依赖也锁死了）
+
+# 在新机器上重建
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+**现代方案对比：**
+
+| 工具                       | 特点                                                 |
+| -------------------------- | ---------------------------------------------------- |
+| `pip` + `requirements.txt` | 标准做法，简单但功能少                               |
+| `pipenv`                   | 自带 Pipfile，声明式依赖                             |
+| `poetry`                   | 依赖管理 + 打包发布一体，有锁文件                    |
+| **`uv`**                   | 2024 年后新宠，极快，兼容 pip 生态，`uv.lock` 锁版本 |
+
+以 `uv` 为例的完整工作流：
+
+```bash
+uv init myproject      # 初始化项目，生成 pyproject.toml
+cd myproject
+uv add requests        # 添加依赖（自动写入 pyproject.toml 并生成 uv.lock）
+uv run main.py         # 自动使用项目环境运行
+```
+
+## 串起来：一个规范项目的样子
+
+```
+myproject/
+├── .venv/                  ← 虚拟环境（永远加进 .gitignore）
+├── myapp/                  ← 包
+│   ├── __init__.py
+│   └── core.py             ← 模块
+├── main.py
+├── requirements.txt        ← 依赖清单（提交到 git）
+└── .gitignore
+```
+
+**四者的关系：** 模块是最小复用单元 → 包把它们组织成层次结构 → 项目代码写好后，虚拟环境保证每个项目的依赖互不干扰 → 依赖清单保证任何人在任何机器上都能 `pip install -r requirements.txt` 还原出一样的环境。
+
+# 迭代器、生成器、装饰器
+
+## 1. 迭代器（Iterator）—— 惰性取值的协议
+
+先区分两个概念：
+
+- **可迭代对象（Iterable）**：实现了 `__iter__` 方法，能被 `for` 遍历。如 list、str、dict、set
+- **迭代器（Iterator）**：同时实现了 `__iter__` 和 `__next__`，是“取值的游标”，**用一次就少一个**
+
+```python
+nums = [1, 2, 3]        # list 是可迭代对象，但不是迭代器
+it = iter(nums)         # iter() 拿到迭代器（调用了 nums.__iter__()）
+
+next(it)   # 1    （调用了 it.__next__()）
+next(it)   # 2
+next(it)   # 3
+next(it)   # StopIteration 异常！耗尽了
+```
+
+**`for` 循环的本质**就是这套协议的语法糖：
+
+```python
+# for x in nums:  等价于：
+it = iter(nums)
+while True:
+    try:
+        x = next(it)
+        print(x)
+    except StopIteration:
+        break
+```
+
+**为什么迭代器是“一次性”的？** 因为它不保存所有数据，只有一个游标：
+
+```python
+it = iter([1, 2, 3])
+print(list(it))    # [1, 2, 3]
+print(list(it))    # []  ← 已经耗尽，第二次为空！
+```
+
+**手动实现一个迭代器**（体会协议的繁琐，引出生成器）：
+
+```python
+class CountDown:
+    def __init__(self, n):
+        self.n = n
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self.n <= 0:
+            raise StopIteration
+        self.n -= 1
+        return self.n + 1
+
+for x in CountDown(3):
+    print(x)    # 3, 2, 1
+```
+
+## 2. 生成器（Generator）—— 一行 `yield` 替代整个类
+
+生成器是**自动实现迭代器协议的函数**：函数体里只要出现 `yield`，这个函数就变成生成器函数，调用它不会执行代码，而是返回一个生成器对象。
+
+```python
+def countdown(n):
+    while n > 0:
+        yield n        # 暂停！交出值，等下次 next 再从这里继续
+        n -= 1
+
+gen = countdown(3)     # ⚠️ 不会执行函数体！只是创建生成器
+next(gen)   # 3
+next(gen)   # 2
+next(gen)   # 1
+next(gen)   # StopIteration
+```
+
+**执行流程**（理解 `yield` 的暂停/恢复）：
+
+```
+调用 countdown(3) ──→ 返回生成器，代码没跑
+next(gen) ──→ 跑到 yield 3，暂停，把 3 交出去
+next(gen) ──→ 从 yield 处恢复，n 变 2，跑到 yield 2，暂停
+...
+n <= 0 ──→ 函数结束，自动抛 StopIteration
+```
+
+上面的 `CountDown` 类 10 行代码，用生成器 4 行搞定——这就是生成器的价值：**免去手写 `__iter__/__next__` 和状态管理**。
+
+**核心优势：惰性求值，省内存**
+
+```python
+# 内存：立即创建 1000 万个数字的列表
+sum([x * x for x in range(10_000_000)])
+
+# 内存：只保存计算逻辑，逐个产出，随时可中断
+sum(x * x for x in range(10_000_000))   # 圆括号 → 生成器表达式
+```
+
+处理大文件时尤其明显：
+
+```python
+# 一次性读入整个文件（大文件会爆内存）
+lines = open("huge.log").readlines()
+
+# 逐行读取，内存占用恒定
+def read_large(path):
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            yield line.strip()
+
+for line in read_large("huge.log"):
+    process(line)
+```
+
+**进阶用法——`yield` 接收值**（协程雏形，了解即可）：
+
+```python
+def echo():
+    while True:
+        received = yield      # yield 不只吐值，还能收值
+        print("收到:", received)
+
+gen = echo()
+next(gen)             # 预激：推进到第一个 yield
+gen.send("hello")     # 收到: hello
+```
+
+## 3. 装饰器（Decorator）—— 不改源码，增强函数
+
+**核心思想**：函数是 Python 的一等公民，可以作为参数传递。装饰器就是一个**接收函数、返回新函数**的函数。
+
+```python
+def log(func):                      # ① 接收原函数
+    def wrapper(*args, **kwargs):   # ② 包装：兼容任意参数
+        print(f"调用 {func.__name__}")
+        result = func(*args, **kwargs)
+        print(f"返回 {result}")
+        return result
+    return wrapper                  # ③ 返回替换后的函数
+
+@log                                # 语法糖，等价于 add = log(add)
+def add(a, b):
+    return a + b
+
+add(1, 2)
+# 输出：
+# 调用 add
+# 返回 3
+```
+
+`@log` 只是简洁写法，展开就是：
+
+```python
+def add(a, b):
+    return a + b
+add = log(add)    # add 名字现在指向 wrapper
+```
+
+**一个必踩的坑——元信息丢失**：
+
+```python
+add.__name__     # 'wrapper' ← 函数身份被顶掉了！
+```
+
+解法：用 `functools.wraps` 复制原函数的元信息（写装饰器的标准模板）：
+
+```python
+from functools import wraps
+
+def log(func):
+    @wraps(func)                    # 保留 func 的名字、docstring 等
+    def wrapper(*args, **kwargs):
+        print(f"调用 {func.__name__}")
+        return func(*args, **kwargs)
+    return wrapper
+```
+
+**带参数的装饰器**——多包一层：
+
+```python
+def repeat(n):                      # 装饰器工厂：先收参数
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            for _ in range(n):
+                result = func(*args, **kwargs)
+            return result
+        return wrapper
+    return decorator
+
+@repeat(3)                          # 等价于 say = repeat(3)(say)
+def say(msg):
+    print(msg)
+
+say("hi")    # 打印 3 次 hi
+```
+
+**实用内置装饰器一览**：
+
+| 装饰器                 | 作用                             |
+| ---------------------- | -------------------------------- |
+| `@staticmethod`        | 静态方法（不接收 self）          |
+| `@classmethod`         | 类方法（第一个参数是 cls）       |
+| `@property`            | 把方法伪装成属性访问             |
+| `@functools.lru_cache` | 自动缓存函数结果（递归优化神器） |
+| `@functools.cache`     | lru_cache(maxsize=None) 的简写   |
+
+```python
+from functools import lru_cache
+
+@lru_cache(maxsize=None)
+def fib(n):
+    return n if n < 2 else fib(n - 1) + fib(n - 2)
+
+fib(100)   # 瞬间出结果；不加缓存则是指数级慢
+```
+
+## 三者串联：一个综合例子
+
+```python
+from functools import wraps
+import time
+
+def timed(func):                          # 装饰器：计时
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        start = time.perf_counter()
+        result = func(*args, **kwargs)
+        print(f"{func.__name__} 耗时 {time.perf_counter() - start:.4f}s")
+        return result
+    return wrapper
+
+@timed
+def consume(gen):                         # 接收生成器，惰性消费
+    total = 0
+    for x in gen:                         # for 自动走迭代器协议
+        total += x
+    return total
+
+consume(x * x for x in range(1_000_000))  # 生成器表达式 + 装饰器
+```
+
+## 总结对比
+
+| 概念   | 一句话                                | 关键字/协议             |
+| ------ | ------------------------------------- | ----------------------- |
+| 迭代器 | 惰性取值的游标对象                    | `__iter__` + `__next__` |
+| 生成器 | 用 `yield` 写的迭代器（自动实现协议） | `yield`                 |
+| 装饰器 | 接收函数返回函数，`@` 语法糖增强它    | `@decorator`            |
+
+**记忆锚点**：`for` 循环驱动迭代器 → 生成器让迭代器好写十倍 → 装饰器让“函数增强”可以像贴标签一样复用。
+
+# 类型标注、dataclass
+
+## 一、类型标注（Type Hints）
+
+### 1. 本质：只做“标注”，不做“强制”
+
+Python 是动态类型语言，类型标注**在运行时不做任何检查**——标注写错了程序照样跑。它的价值在于：
+
+- **IDE 智能提示和补全**（PyCharm、VS Code 的 Pylance）
+- **静态检查工具**（mypy、pyright）能在运行前发现 bug
+- **代码可读性**，相当于自带文档
+
+### 2. 基础用法
+
+```python
+# 变量标注
+age: int = 25
+name: str = "Alice"
+prices: list[float] = [9.9, 19.9]
+
+# 函数标注：参数 + 返回值
+def add(a: int, b: int) -> int:
+    return a + b
+
+# 返回 None 用 -> None（约定俗成）
+def greet(name: str) -> None:
+    print(f"Hello, {name}")
+```
+
+### 3. 容器与泛型（Python 3.9+ 直接用内置类型）
+
+```python
+def process(items: list[str]) -> dict[str, int]:
+    return {item: len(item) for item in items}
+
+# 元组两种写法
+point: tuple[int, int] = (3, 4)        # 固定长度，每个位置类型确定
+scores: tuple[int, ...] = (90, 85, 77) # 任意长度，元素同类型
+
+# 字典：键 -> 值
+config: dict[str, int] = {"timeout": 30}
+
+# 集合
+tags: set[str] = {"a", "b"}
+```
+
+> 注意：Python 3.8 及以前需要 `from typing import List, Dict`（大写开头），3.9+ 直接用 `list[str]` 这种内置写法即可。
+
+### 4. Optional 与联合类型（3.10+ 的 `|` 语法）
+
+```python
+# 老写法
+from typing import Optional, Union
+def find(key: str) -> Optional[str]:   # 可能返回 str 或 None
+    ...
+
+def parse(x: Union[int, str]) -> int:  # 参数可以是 int 或 str
+    ...
+
+# 新写法（3.10+，推荐）
+def find(key: str) -> str | None:      # Optional[str] 等价于 str | None
+    ...
+
+def parse(x: int | str) -> int:
+    ...
+```
+
+`Optional[X]` **不是**“参数可省略”，它就是 `X | None`，这一点常被误解。
+
+### 5. 进阶：Callable、迭代器、泛型
+
+```python
+from collections.abc import Callable, Iterator
+
+# Callable[[参数类型列表], 返回类型] —— 函数作为参数
+def apply(func: Callable[[int], int], x: int) -> int:
+    return func(x)
+
+# 生成器的标注（呼应你之前学的 generator）
+def squares(n: int) -> Iterator[int]:
+    for i in range(n):
+        yield i * i
+
+# 泛型：T 是占位符，"同进同出"
+from typing import TypeVar
+T = TypeVar("T")
+
+def first(items: list[T]) -> T:
+    return items[0]
+
+first([1, 2, 3])   # 推断出 T = int，返回 int
+```
+
+### 6. 更高级的几个（了解即可）
+
+| 类型                | 用途                                         |
+| ------------------- | -------------------------------------------- |
+| `Literal["a", "b"]` | 只允许几个字面量值，类似枚举                 |
+| `Protocol`          | 结构化类型（“鸭子类型”的静态版），不要求继承 |
+| `TypedDict`         | 给字典的键值定类型                           |
+| `Final`             | 常量，不允许重新赋值                         |
+
+---
+
+## 二、dataclass（数据类）
+
+### 1. 解决什么问题
+
+传统写一个“只装数据”的类要写一堆样板代码：
+
+```python
+class Point:
+    def __init__(self, x: int, y: int):
+        self.x = x
+        self.y = y
+    def __repr__(self):
+        return f"Point(x={self.x}, y={self.y})"
+    def __eq__(self, other):
+        return isinstance(other, Point) and self.x == other.x and self.y == other.y
+```
+
+`@dataclass` 装饰器**自动生成** `__init__`、`__repr__`、`__eq__` 等：
+
+```python
+from dataclasses import dataclass
+
+@dataclass
+class Point:
+    x: int          # 字段必须有类型标注，这是 dataclass 的依据
+    y: int
+
+p = Point(1, 2)          # 自动生成的 __init__
+print(p)                 # Point(x=1, y=2)  自动生成的 __repr__
+print(p == Point(1, 2))  # True             自动生成的 __eq__（按字段比较）
+```
+
+> 这里体现了两个知识点的联动：dataclass 的字段标注是**必须的**，它是类型标注最重要的应用场景。
+
+### 2. 默认值与 `field`
+
+```python
+from dataclasses import dataclass, field
+
+@dataclass
+class Cart:
+    items: list[str] = field(default_factory=list)  # 可变默认值必须用 default_factory
+    user: str = "guest"                             # 不可变默认值直接写
+```
+
+**为什么可变默认值要绕一圈？** 如果直接写 `items: list = []`，所有实例会共享同一个列表（和函数默认参数的坑同源）。`default_factory=list` 表示“每次创建实例时调用 `list()` 生成新列表”。
+
+### 3. 常用参数
+
+```python
+@dataclass(frozen=True, order=True, slots=True)
+class Config:
+    host: str = "localhost"
+    port: int = 8080
+```
+
+| 参数                    | 作用                                                         |
+| ----------------------- | ------------------------------------------------------------ |
+| `frozen=True`           | 不可变（赋值会报 `FrozenInstanceError`），且可哈希、能当字典键 |
+| `order=True`            | 生成 `<`、`<=` 等比较方法，可排序                            |
+| `slots=True`（3.10+）   | 用 `__slots__` 省内存、加速属性访问                          |
+| `kw_only=True`（3.10+） | 强制关键字传参，避免一堆位置参数                             |
+
+### 4. `__post_init__`：生成式初始化
+
+`__init__` 是自动生成的，那初始化后的派生逻辑放哪？用 `__post_init__`：
+
+```python
+@dataclass
+class Rect:
+    width: float
+    height: float
+    area: float = field(init=False)  # 不参与 __init__ 参数
+
+    def __post_init__(self):
+        self.area = self.width * self.height  # 在 __init__ 之后自动执行
+```
+
+### 5. 实战模式：嵌套 + 响应你之前学的装饰器
+
+dataclass 本质上也是一个装饰器（和你的 `@log`、`@timed` 是同类机制——接收类、返回加工后的类），所以两者可以叠加。
+
+---
+
+## 三、完整可运行示例
+
+```python
+from dataclasses import dataclass, field
+from collections.abc import Iterator
+from typing import TypeVar
+
+T = TypeVar("T")
+
+def first(items: list[T]) -> T:
+    return items[0]
+
+@dataclass(frozen=True, order=True)
+class Student:
+    name: str
+    score: int = 0
+    tags: list[str] = field(default_factory=list)
+
+    def passed(self) -> bool:
+        return self.score >= 60
+
+if __name__ == "__main__":
+    a = Student("Alice", 92, ["A"])
+    b = Student("Bob", 58)
+    print(a)                      # Student(name='Alice', score=92, tags=['A'])
+    print(a == Student("Alice", 92, ["A"]))  # True
+    print(b.passed())             # False
+    print(sorted([a, b]))         # order=True 使按字段排序
+    # a.score = 100               # frozen=True 下会报错，取消注释试试
+    print(first([a, b]))          # 泛型：推断 T = Student
+```
+
+**运行方式**（Windows）：
+
+```powershell
+python c:\project\cpplearn\python\main.py
+```
+
+# 文件操作，json，日志，命令行
+
+## 一、文件操作
+
+### 1. `open()` 与 `with`：永远用 with
+
+```python
+# 传统写法：容易忘记 close
+f = open("data.txt", "r", encoding="utf-8")
+content = f.read()
+f.close()
+
+# 推荐写法：with 上下文管理器，自动关闭（即使中途抛异常）
+with open("data.txt", "r", encoding="utf-8") as f:
+    content = f.read()
+# 离开 with 块，f 自动关闭
+```
+
+> `with` 背后就是你之前接触过的**上下文管理器协议**（`__enter__`/`__exit__`），和迭代器协议是姊妹篇。
+
+### 2. 模式与编码
+
+```python
+"r"   # 读（默认）
+"w"   # 写：覆盖原文件！文件不存在则创建
+"a"   # 追加：在末尾写
+"x"   # 新建写入：文件已存在则报错（防误覆盖）
+"r+"  # 读写
+
+# 加 b 就是二进制模式："rb", "wb"（图片、pickle 等）
+# t 是文本模式（默认）
+```
+
+**编码大坑**：Windows 上默认编码可能是 GBK，读写 UTF-8 文件会报 `UnicodeDecodeError` 或乱码。**永远显式写 `encoding="utf-8"`**。
+
+### 3. 读取的几种方式
+
+```python
+with open("data.txt", encoding="utf-8") as f:
+    text = f.read()            # 一次全读（大文件慎用）
+    # lines = f.readlines()    # 全读成列表，每项带 \n
+
+# 文件对象本身就是迭代器！直接 for，逐行、省内存 —— 呼应你学的迭代器
+with open("data.txt", encoding="utf-8") as f:
+    for line in f:
+        print(line.rstrip("\n"))   # 行尾自带换行，通常要 strip
+```
+
+### 4. pathlib：现代路径操作
+
+```python
+from pathlib import Path
+
+p = Path("data") / "scores.json"   # 用 / 拼路径，跨平台
+p.parent        # 上级目录
+p.suffix        # 扩展名 ".json"
+p.exists()      # 是否存在
+p.mkdir(parents=True, exist_ok=True)   # 递归建目录，已存在不报错
+p.read_text(encoding="utf-8")          # 一行读文本
+p.write_text("hello", encoding="utf-8")  # 一行写文本
+list(Path(".").glob("*.py"))           # 通配符找文件
+```
+
+> 新代码建议统一用 `pathlib`，它把文件、路径、目录操作都对象化了。
+
+---
+
+## 二、JSON
+
+### 1. 两对函数：字符串 vs 文件
+
+```python
+import json
+
+data = {"name": "张三", "scores": [90, 85], "passed": True}
+
+# Python 对象 -> JSON 字符串
+s = json.dumps(data, ensure_ascii=False, indent=2)
+
+# JSON 字符串 -> Python 对象
+d = json.loads(s)
+
+# 直接写文件 / 读文件（配合刚学的文件操作）
+with open("data.json", "w", encoding="utf-8") as f:
+    json.dump(data, f, ensure_ascii=False, indent=2)
+
+with open("data.json", encoding="utf-8") as f:
+    d = json.load(f)
+```
+
+**记忆技巧**：带 `s`（dumps/loads）操作**字符串**，不带 `s`（dump/load）操作**文件流**。
+
+### 2. 类型对照表
+
+| Python                      | JSON                                |
+| --------------------------- | ----------------------------------- |
+| `dict`                      | `object`                            |
+| `list`、`tuple`             | `array`（注意 tuple 读回来变 list） |
+| `str`                       | `string`                            |
+| `int` / `float`             | `number`                            |
+| `True` / `False`            | `true` / `false`                    |
+| `None`                      | `null`                              |
+| `set`、`datetime`、自定义类 | ❌ 不支持，需自己转换                |
+
+### 3. 两个必知参数与一个坑
+
+```python
+json.dumps(data, ensure_ascii=False, indent=2)
+# ensure_ascii=False：否则中文变 "\u5f20\u4e09"
+# indent=2：格式化缩进，人能看懂；不写则是压成一行的紧凑格式
+# sort_keys=True：键排序，输出稳定（利于 diff）
+
+# 坑：json.loads 解析失败抛 json.JSONDecodeError（ValueError 的子类）
+# 实际项目中读外部 JSON 一定要 try/except
+try:
+    d = json.loads(raw)
+except json.JSONDecodeError as e:
+    print(f"JSON 格式错误: {e}")
+```
+
+如果需要序列化 `datetime` 之类的对象，给 `dumps` 传 `default=str` 或自定义转换函数。
+
+---
+
+## 三、日志（logging）
+
+### 1. 为什么不用 print
+
+print 的问题：没法分级、没法关、没法输出到文件、没法带时间和模块名。`logging` 全都解决。
+
+### 2. 五个级别
+
+```python
+import logging
+
+logging.debug("调试细节")      # 10
+logging.info("常规信息")       # 20
+logging.warning("警告")        # 30  ← 默认级别
+logging.error("出错了")        # 40
+logging.critical("系统崩溃")   # 50
+```
+
+默认级别是 WARNING，所以 debug/info 默认看不到。级别是个“闸门”：设成 INFO 就放行 INFO 及以上的。
+
+### 3. basicConfig：一次性配置
+
+```python
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logging.info("启动完成")
+# 2026-10-08 10:00:00 [INFO] root: 启动完成
+```
+
+### 4. 记录异常堆栈（最实用的一招）
+
+```python
+try:
+    1 / 0
+except ZeroDivisionError:
+    logging.exception("计算失败")   # 自动附带完整堆栈，不用手动 traceback
+```
+
+### 5. 模块化最佳实践
+
+```python
+logger = logging.getLogger(__name__)   # 每个模块一个自己的 logger
+logger.info("...")
+
+# 同时输出到控制台和文件：
+logger = logging.getLogger("app")
+logger.setLevel(logging.DEBUG)
+h1 = logging.StreamHandler()                          # 控制台
+h2 = logging.FileHandler("app.log", encoding="utf-8") # 文件
+h1.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
+h2.setFormatter(logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s"))
+logger.addHandler(h1)
+logger.addHandler(h2)
+```
+
+> `basicConfig` 适合小脚本；多模块项目用 `getLogger(__name__)` + 在入口统一配置。
+
+---
+
+## 四、命令行参数
+
+### 1. sys.argv：最原始
+
+```python
+import sys
+# python tool.py input.json --verbose
+print(sys.argv)   # ['tool.py', 'input.json', '--verbose'] —— 全是字符串
+```
+
+能用，但要自己解析标志位、处理类型转换，很快就会乱。
+
+### 2. argparse：标准库正解
+
+```python
+import argparse
+
+parser = argparse.ArgumentParser(description="JSON 处理工具")
+parser.add_argument("input", help="输入文件路径")              # 位置参数（必填）
+parser.add_argument("-o", "--output", default="out.json",     # 可选参数，-o 是短名
+                    help="输出文件路径")
+parser.add_argument("-n", "--top", type=int, default=3,       # 自动转 int
+                    help="显示前 N 条")
+parser.add_argument("-v", "--verbose", action="store_true",   # 开关：出现即 True
+                    help="显示调试日志")
+
+args = parser.parse_args()
+print(args.input, args.output, args.top, args.verbose)
+# args.verbose 是 bool；args.top 是 int
+```
+
+运行与自动帮助：
+
+```powershell
+python tool.py data.json -o result.json -n 5 -v
+python tool.py -h        # 自动生成帮助文档
+```
+
+> `argparse` 还支持 `choices=["a","b"]`（枚举限制）、`nargs="+"`（多个值）等。第三方库 `click`/`typer`（基于类型标注！）更优雅，等你的类型标注用熟了可以试试 typer。
+
