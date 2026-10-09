@@ -52,3 +52,12 @@
 # data = {"age": 12}
 # with open("data2.json", "a", encoding="utf-8") as f:
 #     json.dump(data, f, ensure_ascii = False, indent = 2)
+
+import numpy as np
+
+# a = np.array([1, 2, 3])
+# b = np.array([4, 5, 6])
+# print(a + b)
+# print(a * 10)
+
+print(np.array([1, 2.5]).dtype)

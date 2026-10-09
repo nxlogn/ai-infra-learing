@@ -2665,3 +2665,256 @@ python tool.py -h        # 自动生成帮助文档
 
 > `argparse` 还支持 `choices=["a","b"]`（枚举限制）、`nargs="+"`（多个值）等。第三方库 `click`/`typer`（基于类型标注！）更优雅，等你的类型标注用熟了可以试试 typer。
 
+# asyncio，多线程，多进程
+
+## 一、总览：先分清两个概念
+
+|              | asyncio（协程）  | 多线程 threading        | 多进程 multiprocessing |
+| ------------ | ---------------- | ----------------------- | ---------------------- |
+| 并发模型     | 单线程协作式切换 | 多线程抢占式切换        | 多进程真并行           |
+| 切换成本     | 极低（用户态）   | 较低（内核态）          | 高（进程间）           |
+| 是否绕过 GIL | ✅ 单线程无需绕   | ❌ CPU 密集仍受 GIL 限制 | ✅ 每进程独立 GIL       |
+| 共享内存     | 天然共享         | 天然共享（需加锁）      | 需 Queue/Pipe/共享内存 |
+| 适用场景     | 高并发 IO        | IO 密集 + 已有阻塞库    | CPU 密集计算           |
+
+**两个关键背景：**
+
+1. **GIL（全局解释器锁）**：CPython 中同一时刻只有一个线程执行 Python 字节码，所以多线程**无法利用多核跑满 CPU**。
+2. **IO 密集 vs CPU 密集**：
+   - IO 密集（网络请求、读写文件、爬虫）→ 瓶颈在等待，asyncio 或多线程都行
+   - CPU 密集（图像处理、排序、科学计算）→ 瓶颈在算力，只能多进程
+
+---
+
+## 二、asyncio：单线程协程
+
+原理：**遇到 IO 就主动让出控制权**，事件循环（event loop）调度下一个协程。因为是"协作式"，切换由你自己的 `await` 决定，没有线程切换的开销，也不用锁。
+
+```python
+import asyncio, aiohttp  # aiohttp 是异步版 requests
+
+async def fetch(session, url):
+    async with session.get(url) as resp:
+        return await resp.text()
+
+async def main():
+    async with aiohttp.ClientSession() as session:
+        urls = ["https://example.com"] * 10
+        tasks = [fetch(session, u) for u in urls]
+        results = await asyncio.gather(*tasks)  # 并发发起 10 个请求
+        print(len(results))
+
+asyncio.run(main())
+```
+
+要点：
+
+- `async def` 定义协程，`await` 只能出现在协程内部，含义是"这里会等，先去跑别人"
+- **不能在协程里调用阻塞函数**（如 `requests.get`、`time.sleep`），否则整个线程都卡住，等于退化成串行。要用 `aiohttp`、`asyncio.sleep` 这类异步库
+- 适合：Web 服务器（FastAPI、aiohttp）、爬虫、WebSocket 高并发连接
+
+---
+
+## 三、多线程 threading
+
+原理：操作系统抢占式调度，多个线程真正交替执行。线程间共享进程内存，**要小心竞态条件**。
+
+```python
+import threading
+
+counter = 0
+lock = threading.Lock()
+
+def worker():
+    global counter
+    for _ in range(100000):
+        with lock:            # 关键操作必须加锁
+            counter += 1
+
+threads = [threading.Thread(target=worker) for _ in range(4)]
+for t in threads: t.start()
+for t in threads: t.join()
+print(counter)  # 400000
+```
+
+要点：
+
+- 优点：**可以直接用 `requests`、`sqlite3` 这些现成的阻塞库**，改造成本低；共享数据方便
+- 缺点：① 受 GIL 限制，CPU 密集任务加速比接近 1（甚至因切换开销更慢）；② 锁用不好会死锁
+- Python 3.13+ 提供了 free-threaded（no-GIL）构建，但目前还不是默认
+- 适合：调用阻塞的第三方库、小规模 IO 并发、GUI 程序保持界面响应
+
+---
+
+## 四、多进程 multiprocessing
+
+原理：每个进程有**独立的解释器和 GIL**，可以真正利用多核并行。
+
+```python
+from multiprocessing import Pool
+
+def calc(n):
+    return sum(i * i for i in range(n))
+
+if __name__ == "__main__":   # Windows 必须加这行，否则递归创建进程
+    with Pool(processes=4) as p:
+        results = p.map(calc, [10**7] * 8)   # 4 个核分摊任务
+    print(results)
+```
+
+要点：
+
+- 数据不能直接共享，需要 `multiprocessing.Queue`、`Pipe` 或 `Manager`
+- 进程创建和通信开销大，任务要**足够重**才划算（一般单个任务 > 100ms）
+- Windows 上必须把入口代码放在 `if __name__ == "__main__":` 里
+- 适合：图像/视频处理、大数据计算、机器学习训练前的预处理
+
+---
+
+## 五、怎么选？决策树
+
+```
+任务瓶颈在哪？
+├─ CPU 密集（纯计算）        → 多进程 multiprocessing
+└─ IO 密集（等待）
+   ├─ 能改成纯异步库？       → asyncio（最高并发，万级连接）
+   ├─ 依赖阻塞库 requests 等？ → 多线程（改造成本最低）
+   └─ 混合型？               → 进程池跑计算 + 线程/协程跑 IO
+```
+
+## 六、一个直观的类比
+
+- **asyncio**：一个服务员（单线程），点完这桌单不等上菜，立刻去下一桌，靠"记得哪桌快好了"来回照应 —— 效率高但不能分身
+- **多线程**：多个服务员共享一个厨房，能同时服务，但厨房有个规矩（GIL）同一时刻只许一人炒菜
+- **多进程**：直接开多家分店，每店独立厨房，真正同时炒菜，但传菜（进程通信）麻烦
+
+# numpy
+
+## 一、为什么需要 NumPy？
+
+```python
+import numpy as np
+
+# Python list：循环逐个相加，慢，且不能直接相加
+a = [1, 2, 3]
+b = [4, 5, 6]
+# a + b  → 结果是拼接 [1,2,3,4,5,6]，不是逐元素相加！
+
+# NumPy array：向量化运算，一条语句搞定，底层是 C 循环
+a = np.array([1, 2, 3])
+b = np.array([4, 5, 6])
+print(a + b)   # [5 7 9]  逐元素相加
+print(a * 10)  # [10 20 30]  标量广播
+```
+
+性能差距通常是 **10~100 倍**，因为：
+
+1. **连续内存存储**：ndarray 在内存中连续排列，CPU 缓存友好
+2. **向量化（vectorization）**：运算在 C 层循环执行，无 Python 对象开销
+3. **广播（broadcasting）**：不同形状的数组自动对齐运算，省掉手写循环
+
+## 二、核心数据结构：ndarray
+
+```python
+a = np.array([1, 2, 3])            # 一维
+b = np.array([[1, 2], [3, 4]])     # 二维（矩阵）
+c = np.zeros((2, 3))               # 2x3 全 0 矩阵
+d = np.ones((3, 3))                # 全 1
+e = np.arange(0, 10, 2)            # [0 2 4 6 8] 类似 range
+f = np.linspace(0, 1, 5)           # 0 到 1 等分 5 份
+g = np.random.rand(2, 2)           # 2x2 随机数
+```
+
+关键属性：
+
+```python
+b.shape    # (2, 2)  形状
+b.ndim     # 2       维度数
+b.dtype    # int32   数据类型（重要！）
+b.size     # 4       元素总数
+```
+
+**dtype 是 NumPy 的重要考点**：ndarray 要求元素类型统一（同质），不像 list 可以混装。常用类型：`int32/int64`、`float64`（默认浮点）、`bool`。类型不匹配时会自动向上转型：
+
+```python
+np.array([1, 2.5]).dtype  # float64，int 被提升为 float
+```
+
+## 三、索引与切片（和 list 的区别是重点）
+
+```python
+a = np.array([[1, 2, 3],
+              [4, 5, 6],
+              [7, 8, 9]])
+
+a[0, 1]        # 2   逗号分隔行列
+a[:2, 1:]      # 二维切片，取前两行的后两列
+a[a > 5]       # 布尔索引：[6 7 8 9]，返回一维数组！
+a[:, 0]        # 第一列 [1 4 7]，注意与 list 切片不同
+```
+
+⚠️ **两个易错点**：
+
+```python
+x = a[0:2]     # 切片 → 是视图（view），改了会影响原数组
+y = a[a > 5]   # 布尔/花式索引 → 是拷贝，改了不影响原数组
+
+x[0, 0] = 99   # 原数组 a 也被改了！
+# 想要独立副本用 a.copy()
+```
+
+这和 Python list 的切片行为（永远是浅拷贝）**完全不同**，是面试常问点。
+
+## 四、广播（broadcasting）
+
+形状不同的数组运算时，NumPy 自动扩展小数组：
+
+```python
+a = np.array([[1], [2], [3]])   # 形状 (3, 1)
+b = np.array([10, 20, 30])      # 形状 (3,)
+a + b                            # 结果 (3, 3)：
+# [[11 21 31]
+#  [12 22 32]
+#  [13 23 33]]
+```
+
+规则（从尾部维度对齐）：维度相等，或其中一方为 1，即可扩展。理解广播能让你**少写很多 for 循环**——而少写循环正是 NumPy 提速的秘诀。
+
+## 五、常用操作速查
+
+```python
+a = np.arange(1, 13).reshape(3, 4)   # reshape 改形状，元素总数必须匹配
+
+a.sum()        # 全部求和      a.sum(axis=0)  # 按列求和（压缩行）
+a.mean()       # 平均值        a.max(axis=1)  # 每行最大值
+a.min(); a.std(); a.argmax()  # 最小值/标准差/最大值的下标
+a.sort(axis=1)              # 每行排序
+np.dot(a, b)                # 矩阵乘法
+a.T                          # 转置
+np.concatenate([a, b])      # 拼接
+np.vstack([a, b]) / np.hstack([a, b])  # 纵向/横向堆叠
+```
+
+**聚合类函数都有 axis 参数**，记住一句话：`axis=0` 是"沿行的方向压缩（跨行运算）"，`axis=1` 是沿列的方向。
+
+## 六、ufunc（通用函数）
+
+所有对单个元素的数学运算都有向量化版本：
+
+```python
+np.sqrt(a); np.exp(a); np.log(a)
+np.sin(a); np.abs(a)
+np.clip(a, 0, 5)   # 把超出 [0,5] 的值截断，预处理常用
+```
+
+## 七、线性代数与文件
+
+```python
+np.linalg.inv(M)      # 逆矩阵
+np.linalg.det(M)      # 行列式
+np.linalg.eig(M)      # 特征值/特征向量
+
+np.save('arr.npy', a)       # 二进制保存（快）
+a = np.load('arr.npy')
+np.savetxt('a.csv', a, delimiter=',')   # CSV
+```
