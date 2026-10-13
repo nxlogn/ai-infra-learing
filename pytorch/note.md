@@ -333,26 +333,860 @@ optimizer = optim.SGD(model.parameters(), lr=0.1)
 model.head = nn.Linear(10, 10)   # 后注册的 head.weight 永远不会被更新
 ```
 
+# 常见网络层和算子
+
+## 一、先分清两个概念
+
+| 概念                | 英文              | 本质                             | 是否带参数 | 典型 API                 |
+| ------------------- | ----------------- | -------------------------------- | ---------- | ------------------------ |
+| **层 (Layer)**      | `nn.Module`       | 有状态、可持有权重、可组合成模型 | ✅ 通常有   | `nn.Linear`、`nn.Conv2d` |
+| **算子 (Operator)** | `torch.*` / `F.*` | 无状态的纯函数，输入→输出        | ❌ 无       | `torch.matmul`、`F.relu` |
+
+一句话：**层 = 算子 + 可学习参数 + 状态管理（如 state_dict）**
+
+## 二、常用网络层（nn.*）
+
+### 1. 全连接层 `nn.Linear`
+
+```python
+fc = nn.Linear(in_features=128, out_features=64, bias=True)
+y = fc(x)   # x: (B, 128) -> y: (B, 64)
+```
+
+本质就是 `y = x @ W.T + b`，权重形状 `W: (out, in)`。**Transformer、MLP 的最后一层几乎都是它。**
+
+### 2. 卷积层 `nn.Conv2d` / `Conv1d`
+
+```python
+conv = nn.Conv2d(in_channels=3, out_channels=16, kernel_size=3, padding=1, stride=1)
+y = conv(x)   # x: (B, 3, H, W) -> y: (B, 16, H, W)
+```
+
+- 局部连接 + 权重共享，专治图像的空间结构。
+- 关键超参：`kernel_size`（感受野）、`stride`（下采样）、`padding`（保尺寸）、`groups`（分组卷积，`groups=in=out` 即深度可分离）。
+
+### 3. 池化层 `nn.MaxPool2d` / `AvgPool2d`
+
+```python
+pool = nn.MaxPool2d(kernel_size=2, stride=2)
+y = pool(x)   # (B, C, H, W) -> (B, C, H/2, W/2)
+```
+
+无参数，只做降采样。现代网络里常被 `stride=2` 的卷积或 `AdaptiveAvgPool2d(1)`（全局池化）替代。
+
+### 4. 归一化层 `nn.BatchNorm2d` / `LayerNorm`
+
+```python
+bn  = nn.BatchNorm2d(16)          # CNN 常用，对 (B,H,W) 归一化，含 running 统计
+ln  = nn.LayerNorm(128)           # Transformer 常用，对最后一维归一化
+```
+
+**注意**：BN 有 `running_mean/running_var` 这种"不参与梯度但进 state_dict"的量——本质就是 buffer（跟你 demo 里的 `scale` 同类）。`train()` 和 `eval()` 下行为不同，这是新手最常见的坑。
+
+### 5. Dropout `nn.Dropout`
+
+```python
+dp = nn.Dropout(p=0.5)
+```
+
+训练时随机置零、缩放，`eval()` 时变成恒等。**防过拟合**，仅训练期生效。
+
+### 6. 激活函数层 `nn.ReLU` / `GELU` / `Sigmoid`
+
+```python
+act = nn.GELU()   # Transformer 默认
+act = nn.ReLU()   # CNN 默认
+```
+
+它们本身是无参层，等价于对应的 `F.*` 算子；包成层只是为了塞进 `nn.Sequential`。
+
+### 7. 嵌入层 `nn.Embedding`
+
+```python
+emb = nn.Embedding(num_embeddings=10000, embedding_dim=128)
+y = emb(idx)   # idx: (B, L) 的 int64 -> y: (B, L, 128)
+```
+
+本质是一张可学习的查找表（`(vocab, dim)` 的矩阵），NLP 输入的第一站。
+
+### 8. 序列/注意力层 `nn.LSTM` / `nn.MultiheadAttention`
+
+```python
+mha = nn.MultiheadAttention(embed_dim=128, num_heads=8, batch_first=True)
+out, attn = mha(q, k, v)   # batch_first=True 时形状为 (B, L, D)
+```
+
+`nn.TransformerEncoderLayer` 就是 `MultiheadAttention + LayerNorm + FFN + Dropout` 的封装。
+
+### 9. 容器 `nn.Sequential` / `ModuleList` / `ModuleDict`
+
+```python
+net = nn.Sequential(nn.Linear(128, 64), nn.ReLU(), nn.Linear(64, 10))
+
+layers = nn.ModuleList([nn.Linear(64, 64) for _ in range(4)])   # 会被注册进参数
+plain_list = [nn.Linear(64, 64) for _ in range(4)]              # ❌ 不会注册，参数丢失
+```
+
+**这是极高频的坑**：用普通 Python `list` 存子层，`parameters()` 会漏掉它们。
+
+## 三、常用算子（torch.* / F.*）
+
+### 1. 线性代数类
+
+| 算子                     | 说明                   | 形状                      |
+| ------------------------ | ---------------------- | ------------------------- |
+| `a @ b` / `torch.matmul` | 矩阵乘（支持广播批维） | `(B,m,k)@(B,k,n)→(B,m,n)` |
+| `torch.einsum`           | 爱因斯坦求和，万能表达 | `"bij,bjk->bik"`          |
+| `torch.bmm`              | 批量矩阵乘             | `(B,m,k)@(B,k,n)`         |
+
+### 2. 逐元素类（element-wise）
+
+```python
+a + b, a * b, torch.exp(a), torch.clamp(a, 0, 1)
+```
+
+要求形状可**广播**（broadcasting），这是"隐式扩维"机制，比如 `(B,1,D) + (B,L,D)`。
+
+### 3. 归约类（reduction）
+
+| 算子                           | 说明                              |
+| ------------------------------ | --------------------------------- |
+| `x.sum(dim=1)`                 | 沿某维求和                        |
+| `x.mean(dim=-1, keepdim=True)` | 求均值并保留维度                  |
+| `x.max(dim=1)`                 | 返回 `(values, indices)` 两个结果 |
+| `torch.softmax(x, dim=-1)`     | 归一化成概率                      |
+
+`dim` 参数是核心——选错维度是最常见 bug。
+
+### 4. 形状变换类
+
+```python
+x.view(B, -1)          # 要求内存连续，否则报错
+x.reshape(B, -1)       # 不连续时自动复制
+x.permute(0, 2, 1)     # 换维，改 stride 不搬数据
+x.unsqueeze(1)         # 插入维度
+x.squeeze()            # 去掉长度为 1 的维
+x.flatten(1)           # 从第 1 维起拉平
+```
+
+### 5. 拼接/堆叠/索引
+
+```python
+torch.cat([a, b], dim=1)    # 沿已有维拼接
+torch.stack([a, b], dim=0)  # 新建一维堆叠
+x[mask]                     # 布尔掩码索引
+torch.gather(x, 1, idx)     # 按索引取值
+```
+
+## 四、层 vs 算子的选择原则
+
+```python
+# 有参数、要进 state_dict → 用层
+self.proj = nn.Linear(128, 128)
+
+# 无参数、临时计算 → 用算子
+y = torch.relu(self.proj(x) + residual)
+```
+
+**判据**：需要被优化器更新/需要保存权重 → 层；只是纯计算 → 算子
+
+# 训练与推理模式
+
+## 一、autograd（自动微分）
+
+### 1. 核心思想：动态计算图
+
+每次对 Tensor 做运算，PyTorch 会**边算边记录**一张图（动态图，define-by-run）：
+
+```python
+import torch
+
+x = torch.tensor([2.0], requires_grad=True)
+y = x ** 2 + 3 * x          # 前向：同时建图
+y.backward()                # 反向：沿图回传
+print(x.grad)               # dy/dx = 2x + 3 = 7
+```
+
+- **前向传播**：算出结果，同时记住"这个结果是怎么来的"。
+- **反向传播**：从 loss 出发，用链式法则自动求导。
+
+### 2. 关键概念对照表
+
+| 概念                | 含义                                 | 关键 API                 |
+| ------------------- | ------------------------------------ | ------------------------ |
+| `requires_grad`     | 是否追踪该张量的梯度                 | `x.requires_grad_(True)` |
+| **叶子张量 (leaf)** | 用户直接创建的张量，梯度存于 `.grad` | `x.is_leaf`              |
+| **非叶子张量**      | 运算产生的中间结果，默认不保存 grad  | `y.is_leaf → False`      |
+| `.grad`             | 累积的梯度（**注意是累加不是覆盖**） | `x.grad`                 |
+| `grad_fn`           | 指向生成该张量的反向函数             | `y.grad_fn`              |
+| 计算图              | 前向记录下来的求导关系网             | —                        |
+
+```python
+x = torch.tensor([2.0], requires_grad=True)   # 叶子
+y = x * 3                                      # 非叶子
+z = y.sum()
+print(y.grad_fn)      # <MulBackward0>
+print(y.is_leaf)      # False
+z.backward()
+print(x.grad)         # tensor([3.])   ← 只有叶子有 .grad
+```
+
+### 3. 三个必踩的坑
+
+**坑 1：梯度会累积，必须手动清零**
+
+```python
+for step in range(3):
+    loss = model(x).sum()
+    loss.backward()
+    # ❌ 忘了清零，梯度会叠加
+    optimizer.zero_grad()   # ✅ 标准位置：backward 之后、step 之前
+    optimizer.step()
+```
+
+`x.grad` 是**累加**的（为了支持梯度累积技巧），所以每个 iteration 前要 `zero_grad()`。更规范的顺序是：
+
+```python
+optimizer.zero_grad()   # 1. 清零
+loss.backward()         # 2. 反向
+optimizer.step()        # 3. 更新参数
+```
+
+**坑 2：推理时不需要建图**
+
+```python
+with torch.no_grad():        # 关掉建图，省显存、加速
+    y = model(x)
+```
+
+**坑 3：切断梯度用 `detach()`**
+
+```python
+a = torch.tensor([1.0], requires_grad=True)
+b = a.detach()      # b 与 a 共享数据，但脱离计算图
+c = a * 2           # c 会回传到 a
+```
+
+`detach()` 常用于：固定 target、对抗训练、只需数值不需梯度。
+
+### 4. `no_grad` vs `inference_mode`
+
+| 方式                     | 效果                           | 场景           |
+| ------------------------ | ------------------------------ | -------------- |
+| `torch.no_grad()`        | 不建图，结果仍是普通张量       | 验证、通用场景 |
+| `torch.inference_mode()` | 更彻底，禁用版本计数，**更快** | 纯推理、部署   |
+| `torch.enable_grad()`    | 在 no_grad 内临时重开          | 嵌套控制       |
+
+`inference_mode` 里的张量**不能再参与需要梯度的计算**，所以只用于纯前向。日常 `no_grad` 更安全。
+
+## 二、训练模式 vs 推理模式
+
+### 1. 为什么需要两种模式？
+
+有些层在两种模式下**行为不同**：
+
+| 层          | `train()` 模式                        | `eval()` 模式             |
+| ----------- | ------------------------------------- | ------------------------- |
+| `Dropout`   | 随机置零 + 缩放                       | 恒等（不动）              |
+| `BatchNorm` | 用当前 batch 统计，更新 running stats | 用固定的 running_mean/var |
+| `LayerNorm` | 无差别                                | 无差别                    |
+
+**这是新手最高频的 bug**：训练完忘了 `eval()`，验证集指标飘忽不定。
+
+### 2. 两个开关，别搞混
+
+```python
+model.train()   # 切"训练模式"：Dropout/BN 开启训练行为（默认就是 train）
+model.eval()    # 切"推理模式"：Dropout/BN 切到推理行为
+
+# 另一个是"是否建图"，与上面独立：
+with torch.no_grad():
+    ...
+```
+
+**关键区分**：
+
+- `model.train()` / `model.eval()` → 控制**层的行为**（Dropout、BN）。
+- `torch.no_grad()` → 控制**是否记录计算图**。
+
+推理时**两个都要做**：
+
+```python
+model.eval()
+with torch.no_grad():
+    out = model(x)
+```
+
+它们**互相独立**：`eval()` 不会自动关建图，`no_grad()` 也不会自动切换 Dropout 行为。这正是很多人困惑的点。
+
+### 3. `eval()` 的递归性
+
+`model.eval()` 会**递归**把子模块都设为 eval（因为它是 `nn.Module` 的方法），手写的自定义层若行为依赖模式，可以覆写：
+
+```python
+def train(self, mode: bool = True):
+    super().train(mode)
+    # 自定义逻辑
+    return self
+```
+
+## 三、标准训练循环（融合上面所有点）
+
+```python
+model.train()
+for epoch in range(epochs):
+    for x, y in train_loader:
+        x, y = x.to(device), y.to(device)
+
+        optimizer.zero_grad()      # 1. 清梯度
+        out = model(x)             # 2. 前向（建图）
+        loss = criterion(out, y)   # 3. 算损失
+        loss.backward()            # 4. 反向（求梯度）
+        optimizer.step()           # 5. 更新参数
+
+    model.eval()                   # 切推理模式
+    with torch.no_grad():          # 关建图
+        for x, y in val_loader:
+            out = model(x)
+            # 计算验证指标
+    model.train()                  # 切回训练模式
+```
+
+记忆口诀：
+
+> **训练 = `train()` + 建图；推理 = `eval()` + `no_grad()`。**
+> 每步 `zero_grad → forward → backward → step`。
+
+# state_dict、模型保存与权重加载
+
+## 一、state_dict 到底是什么
+
+`state_dict` 是一个 **`OrderedDict`**，保存了模型**所有需要持久化的张量**，即：
+
+```
+state_dict = parameters（可学习权重） + buffers（不可学习但需保存的状态）
+```
+
+回到你 demo.py 的那个 `Block`：
+
+```python
+class Block(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.weight = nn.Parameter(torch.ones(2,2))   # → 参数
+        self.register_buffer('scale', torch.tensor(2.0))  # → buffer
+        self.plain = torch.tensor(3.0)                # → 普通属性，都不进
+
+b = Block()
+print([n for n, _ in b.named_parameters()])   # ['weight']
+print([n for n, _ in b.named_buffers()])      # ['scale']
+print(list(b.state_dict().keys()))            # ['weight', 'scale']  ← 两者之和
+print(len(list(b.parameters())))              # 1
+```
+
+| 属性                  | 是否进 `parameters()` | 是否进 `state_dict()` | 是否更新梯度 |
+| --------------------- | --------------------- | --------------------- | ------------ |
+| `nn.Parameter`        | ✅                     | ✅                     | ✅            |
+| `register_buffer`     | ❌                     | ✅                     | ❌            |
+| 普通属性 `self.plain` | ❌                     | ❌                     | ❌            |
+
+**一句话**：`state_dict` = 参数 ∪ buffer。BN 的 `running_mean/running_var` 就是靠 buffer 机制被保存下来的，这也解释了为什么它"不训练却要存"。
+
+## 二、模型保存的三种方式
+
+### 方式 1：只存 state_dict（**推荐**）
+
+```python
+torch.save(model.state_dict(), "model.pth")
+```
+
+- 存的是**纯张量字典**，与模型代码解耦。
+- 加载时需要先 `new_model = MyModel()`，再 `load_state_dict`。
+- ✅ 官方推荐，稳定、可跨版本、体积小。
+
+### 方式 2：存整个模型（不推荐）
+
+```python
+torch.save(model, "model_full.pth")     # 底层用 pickle 序列化整个对象
+model = torch.load("model_full.pth")
+```
+
+- ❌ 强依赖类的定义路径（重构/改名就加载失败）、有安全风险、体积大。
+- 只适合临时调试。
+
+### 方式 3：存 checkpoint（训练中断恢复）
+
+```python
+torch.save({
+    "epoch": epoch,
+    "model_state": model.state_dict(),
+    "optimizer_state": optimizer.state_dict(),
+    "scheduler_state": scheduler.state_dict(),
+    "loss": loss.item(),
+}, "ckpt.pth")
+```
+
+- 存**训练的全部状态**，用于断点续训。
+- **优化器状态也要存**（如 Adam 的 `exp_avg`），否则续训会掉点。
+
+| 方式         | 内容                 | 用途               |
+| ------------ | -------------------- | ------------------ |
+| `state_dict` | 权重 + buffer        | 发布、推理、迁移   |
+| 整个模型     | pickle 对象          | 临时调试（不推荐） |
+| checkpoint   | 权重 + 优化器 + 进度 | 断点续训           |
+
+## 三、权重加载 load_state_dict
+
+### 1. 标准流程
+
+```python
+model = MyModel()
+state = torch.load("model.pth", map_location="cpu")
+model.load_state_dict(state)
+model.eval()
+```
+
+注意 `load_state_dict` 是**原地修改**（in-place），直接改 `model` 自己的参数，不返回新对象。
+
+### 2. strict 参数与两类报错
+
+```python
+model.load_state_dict(state, strict=True)   # 默认：键必须完全一致
+```
+
+| 报错              | 含义                   | 常见原因            |
+| ----------------- | ---------------------- | ------------------- |
+| `missing_keys`    | 模型有、权重文件里没有 | 权重是旧版/少存了层 |
+| `unexpected_keys` | 权重文件有、模型里没有 | 多了层、改了结构    |
+
+**部分加载**（迁移学习核心）：
+
+```python
+info = model.load_state_dict(state, strict=False)
+print(info.missing_keys)      # 未被赋值的层（会保持随机初始化）
+print(info.unexpected_keys)   # 被忽略的多余权重
+```
+
+`strict=False` 是迁移学习/加载预训练权重时的标准操作。
+
+### 3. 只加载部分层（冻结 backbone）
+
+```python
+pretrained = torch.load("resnet.pth")
+model_dict = model.state_dict()
+# 只保留名字和形状都匹配的
+matched = {k: v for k, v in pretrained.items()
+           if k in model_dict and v.shape == model_dict[k].shape}
+model_dict.update(matched)
+model.load_state_dict(model_dict)。
+
+# 冻结已加载的层
+for name, param in model.named_parameters():
+    if name in matched:
+        param.requires_grad = False
+```
+
+## 四、设备与 dtype 问题
+
+```python
+# 在 GPU 上存的权重，想在 CPU 加载 → 必须 map_location
+state = torch.load("model.pth", map_location="cpu")
+state = torch.load("model.pth", map_location="cuda:0")
+state = torch.load("model.pth", map_location={"cuda:0": "cpu"})  # 精细映射
+```
+
+**关键**：保存时 `model.state_dict()` 里的张量带着原设备信息。跨设备加载**务必用 `map_location`**，否则会因找不到原 GPU 而报错。加载后再统一 `.to(device)`：
+
+```python
+model = MyModel().to(device)
+model.load_state_dict(torch.load("model.pth", map_location=device))
+```
+
+## 五、保存/加载的最佳实践清单
+
+```python
+# ---- 保存 ----
+model.eval()                                   # 建议先切 eval，保证 buffer 是推理态
+torch.save(model.state_dict(), "best.pth")     # 只存权重
+
+# ---- 加载 ----
+model = MyModel()                              # 1. 先构造同结构模型
+state = torch.load("best.pth", map_location="cpu")  # 2. 加载 + 设备映射
+model.load_state_dict(state, strict=True)      # 3. 严格校验
+model.to(device)                               # 4. 移到目标设备
+model.eval()                                   # 5. 切推理模式
+```
+
+**易错点速查**：
+
+| 坑                                | 正确做法                                |
+| --------------------------------- | --------------------------------------- |
+| 用 `torch.save(model)` 存整个模型 | 改成 `torch.save(model.state_dict())`   |
+| 加载后忘了 `eval()`               | 推理前必须 `model.eval()`               |
+| 跨设备加载报错                    | 加 `map_location`                       |
+| 断点续训只存了权重                | checkpoint 要连优化器一起存             |
+| 改了结构后 `strict=True` 报错     | 用 `strict=False` 看 missing/unexpected |
+
+记忆口诀：
+
+> **存：`torch.save(model.state_dict())`；取：先建模型 → `load_state_dict` → `eval()`。**
+> `state_dict = 参数 + buffer`，跨设备记得 `map_location`
+
+# FP32 / FP16 / BF16 / 混合精度
+
+这四个概念都围绕一个核心问题：**如何用更少的比特表示浮点数，从而在训练/推理时省显存、提速，同时尽量不损失精度。**
+
 ---
 
-## 6. 用 C++ 的思维理解
+## 一、先理解浮点数的三要素
 
-| PyTorch                               | C++ 类比                                                     |
-| ------------------------------------- | ------------------------------------------------------------ |
-| `nn.Module` 的 `__setattr__` 自动注册 | 带"父指针"的成员对象（类似 Qt `QObject` 的父子树），赋值即挂到对象树上 |
-| `parameters()` 递归遍历               | 对对象树做深度优先遍历，收集特定类型成员                     |
-| `Parameter` 被优化器持有引用          | 训练管理器里存了一批 `T*` 指针，每步 `*p += delta`           |
-| `state_dict()`                        | `save()/load()` 序列化协议：遍历所有"需要持久化"的成员       |
-| `buffer`                              | 需要随对象一起序列化/搬迁的 `const` 缓存数据（如查表、mask） |
-| `train()/eval()`                      | 沿树传播的模式标志位（影响子模块行为，类似策略开关）         |
+任何浮点数格式都由三段组成（IEEE 754 标准）：
 
-**记忆锚点**：判断一个张量该怎么放，问自己两个问题——
+```
+[ 符号位 sign | 指数位 exponent | 尾数位 mantissa ]
+      1 bit         决定范围         决定精度
+```
 
-1. 它需要被训练吗？→ 需要就 `nn.Parameter`
-2. 它需要跟着 `.to(device)` 走 / 进 `state_dict` 吗？→ 需要就 `register_buffer`
+- **符号位**：1 bit，正负。
+- **指数位（exponent）**：决定这个数能表示**多大 / 多小**（动态范围）。
+- **尾数位（mantissa / fraction）**：决定这个数的**有效数字位数**（精度）。
 
-两个都否 → 普通属性随便放。
+> 关键记忆：**指数位管"范围"，尾数位管"精度"**。这是理解 FP16 和 BF16 差异的钥匙。
 
 ---
 
-需要的话，我可以把这份整理追加进 [note.md](file:///c:/project/cpplearn/pytorch/note.md)，或者把上面的验证代码写进 [demo.py](file:///c:/project/cpplearn/pytorch/demo.py) 方便你直接跑（比如给 Block 加个 `.to('cuda')` 前后对比 `plain` 和 `scale` 的 device）。
+## 二、三种格式逐位对比
+
+| 格式     | 总位数 | 符号 | 指数 | 尾数 | 指数偏移 | 动态范围（约） | 十进制有效精度 |
+| -------- | ------ | ---- | ---- | ---- | -------- | -------------- | -------------- |
+| **FP32** | 32     | 1    | 8    | 23   | 127      | ±3.4×10³⁸      | ~7 位          |
+| **FP16** | 16     | 1    | 5    | 10   | 15       | ±65504         | ~3 位          |
+| **BF16** | 16     | 1    | 8    | 7    | 127      | ±3.4×10³⁸      | ~2 位          |
+
+### 逐个拆解
+
+**FP32（单精度，float）**
+
+- 深度学习早期的默认格式，精度高、范围大。
+- 缺点：显存占用大、计算慢。一张 24GB 卡存 FP32 模型，换成 FP16 能存近两倍。
+
+**FP16（半精度，half）**
+
+- 指数只有 **5 位**，所以动态范围很小，最大只有 **65504**。
+- 尾数 10 位，精度尚可（约 3 位十进制）。
+- 致命弱点：**容易溢出（overflow）或下溢（underflow）**。梯度、激活值稍大就会变成 `inf`，稍小就变成 `0`。这就是为什么需要 **loss scaling**（损失缩放）。
+
+**BF16（Brain Float 16，bfloat16）**
+
+- Google Brain 提出的格式。核心设计思想：**"偷" FP32 的指数位，牺牲尾数精度**。
+- 指数位和 FP32 **完全一样（8 位）**，所以动态范围和 FP32 相同，**不会溢出**。
+- 代价：尾数只有 7 位，精度比 FP16 还差（约 2 位十进制）。
+- 直觉理解：**BF16 ≈ 把 FP32 截断保留高 16 位**，是 FP32 的"粗略近似"。
+
+> 一句话对比：
+>
+> - **FP16 = 范围小、精度高** → 需要小心溢出
+> - **BF16 = 范围大、精度低** → 稳，不易溢出，但有效数字少
+
+---
+
+## 三、为什么需要混合精度？
+
+纯 FP16 训练的问题：
+
+1. **梯度太小**：反向传播的梯度常常小到 1e-8，FP16 直接下溢成 0 → 训练不动。
+2. **数值溢出**：大激活值超过 65504 → 变 `inf` → 权重被污染成 `NaN`。
+
+**混合精度（Mixed Precision）** 的核心思想是：**把不同精度用在最合适的地方**。
+
+典型策略（以 PyTorch AMP 为例）：
+
+| 环节                         | 使用精度        | 原因                             |
+| ---------------------------- | --------------- | -------------------------------- |
+| 前向传播 / 矩阵乘法          | **FP16 / BF16** | 计算密集，用低精度加速、省显存   |
+| 权重主副本（master weights） | **FP32**        | 参数更新需要高精度，避免累积误差 |
+| 梯度累加 / 优化器更新        | **FP32**        | 防止小梯度下溢                   |
+| Loss Scaling                 | 动态缩放        | 把 FP16 梯度放大后再算，避免下溢 |
+
+### 动态损失缩放（Dynamic Loss Scaling）原理
+
+```
+1. 计算 loss
+2. loss *= scale（比如 2^16）      # 放大，让梯度进入 FP16 可表示范围
+3. 反向传播，得到放大的梯度
+4. 梯度 /= scale                    # 还原
+5. 如果检测到 inf/NaN → 减小 scale；若长期稳定 → 增大 scale
+```
+
+这就是 PyTorch `torch.cuda.amp.GradScaler` 帮你自动做的事。
+
+---
+
+## 四、PyTorch 代码示例
+
+```python
+import torch
+
+# ---------- 1. 类型转换 ----------
+x = torch.tensor([1.0, 2.0, 3.0], dtype=torch.float32)  # 默认 FP32
+x_fp16 = x.half()          # 转 FP16
+x_bf16 = x.bfloat16()      # 转 BF16
+
+print(torch.finfo(torch.float16))   # 查看 FP16 范围/精度信息
+print(torch.finfo(torch.bfloat16))
+
+# ---------- 2. 混合精度训练（AMP 自动混合精度）----------
+model = MyModel().cuda()
+optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+
+# FP16 场景用 GradScaler 防下溢
+scaler = torch.cuda.amp.GradScaler()
+
+for data, target in dataloader:
+    optimizer.zero_grad()
+
+    with torch.autocast(device_type="cuda", dtype=torch.float16):
+        output = model(data)          # 前向自动用 FP16
+        loss = loss_fn(output, target)
+
+    scaler.scale(loss).backward()     # 放大后反向传播
+    scaler.step(optimizer)            # 内部先反缩放再更新
+    scaler.update()                   # 动态调整 scale
+```
+
+**BF16 的简化**：因为 BF16 范围和 FP32 一样，**通常不需要 GradScaler**：
+
+```python
+with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+    output = model(data)
+    loss = loss_fn(output, target)
+
+loss.backward()          # 直接反传即可
+optimizer.step()
+```
+
+---
+
+## 五、如何选择？（实用决策）
+
+| 场景                                      | 推荐                   | 理由                                  |
+| ----------------------------------------- | ---------------------- | ------------------------------------- |
+| 老架构 GPU（V100、T4、RTX 20 系）         | **FP16 + GradScaler**  | 硬件支持 FP16 Tensor Core，但需防溢出 |
+| 新架构 GPU（A100、H100、RTX 30/40/50 系） | **BF16**               | 原生支持 BF16，范围大、免缩放，更省心 |
+| 需要最高数值稳定性（科学计算）            | **FP32**               | 精度优先                              |
+| 大模型推理                                | **FP16 / BF16 / INT8** | 省显存、提吞吐                        |
+| 训练大语言模型（LLM）                     | **BF16 为主**          | 稳定 + 省显存，已是行业默认           |
+
+> **一句话总结选择逻辑**：
+>
+> - 硬件支持 BF16 就优先用 **BF16**（省心、稳）。
+> - 只支持 FP16 就用 **FP16 + GradScaler**（需处理溢出）。
+> - 追求极致精度或做数值敏感计算时用 **FP32**。
+
+---
+
+## 六、和其他概念的关系（延伸）
+
+- **TF32**：NVIDIA A100 引入，19 位（1+8+10），介于 FP32 和 FP16 之间，**专用于矩阵乘法**，PyTorch 默认在 Ampere 及以上开启 `torch.backends.cuda.matmul.allow_tf32`。
+- **FP8（E4M3 / E5M2）**：H100 及更新的卡支持，用于超大模型训练/推理，是当前最前沿方向。
+- **INT8 / INT4**：量化推理，用整数表示，和浮点精度是另一条技术路线。
+
+---
+
+## 核心记忆点
+
+1. **指数位管范围，尾数位管精度**。
+2. **FP16**：范围小精度高 → 易溢出，需 loss scaling。
+3. **BF16**：范围大精度低 → 稳定，免 scaling，现代首选。
+4. **混合精度**：计算用低精度、累加/更新用 FP32，兼顾速度与稳定。
+5. 选型看**硬件支持**：有 BF16 就用 BF16，否则 FP16+Scaler，精度敏感用 FP32。
+
+# CUDA 内存管理、同步、性能计时
+
+## 一、CUDA 内存管理：Caching Allocator
+
+### 1.1 为什么 PyTorch 不直接调 `cudaMalloc`
+
+CUDA 驱动层分配显存只有两个接口：`cudaMalloc` / `cudaFree`。它们的代价很高（要跟驱动做上下文交互、可能需要同步整个设备），如果每个张量都走一次，训练一个模型会死慢。
+
+PyTorch 在底层内置了一个 **Caching Allocator（缓存分配器）**：
+
+- **第一次分配时**：向驱动申请一大块显存，这块量叫 **reserved（保留量）**；
+- **之后分配张量**：从已保留的大块里快速切一小块出来，几乎零开销，这部分叫 **allocated（实际占用量）**；
+- **张量被释放时**：显存并不还给驱动，而是留在缓存池里给下一个张量复用。
+
+所以你会看到两个数字永远不相等：
+
+```python
+import torch
+
+x = torch.randn(1024, 1024, device="cuda")   # 触发首次分配，reserved 会暴涨
+print("allocated:", torch.cuda.memory_allocated() / 1024**2, "MB")   # 实际被张量占用的
+print("reserved :", torch.cuda.memory_reserved()  / 1024**2, "MB")   # 分配器从驱动扣住的
+
+# 释放张量后：allocated 下降，reserved 基本不动
+del x
+print("after del, allocated:", torch.cuda.memory_allocated() / 1024**2, "MB")
+print("after del, reserved :", torch.cuda.memory_reserved()  / 1024**2, "MB")
+```
+
+`torch.cuda.empty_cache()` 的作用是**把缓存池里空闲的块还给驱动**，`reserved` 会降下来。但注意：它不释放正在使用的张量，而且清空后下次分配又要重新申请，反而变慢。所以它是"给别的程序腾显存"用的，不是日常优化手段。
+
+### 1.2 和你的 storage 知识呼应
+
+还记得你之前学的 `storage` 吗？Tensor 的"壳"（shape/stride）和"数据"（storage）是分离的，显存管理作用于 **storage 这个真正的数据块**。多个 Tensor 可以共享同一个 storage（比如 `t.view()`），此时释放一个 Tensor 并不会真正释放显存——因为底层 storage 还被引用着。这也是显存"看着没释放"的常见原因之一。
+
+### 1.3 常用诊断工具
+
+```python
+print(torch.cuda.memory_summary())   # 一页纸报告：分配块数、碎片、最大块等
+print(torch.cuda.memory_allocated()) # 字节数
+print(torch.cuda.memory_reserved())
+```
+
+### 1.4 显存"泄漏"的常见姿势（都是代码问题，不是真的泄漏）
+
+```python
+# 错误示范：循环里把中间结果都攒着
+outs = []
+for i in range(1000):
+    outs.append(torch.randn(4096, 4096, device="cuda"))   # 全部常驻显存
+
+# 正确做法：用完即丢，或用 inplace / 原地累加
+```
+
+还有一个要点：**Stream-Ordered Allocation（按流排序的分配）**。缓存分配器记住每个块是被哪个 CUDA stream 使用的，同一块显存可以跨 stream 复用而无需全局同步，靠事件（Event）来保证安全——这就引出第二部分的"同步"。
+
+---
+
+## 二、同步（Synchronization）：一切都是异步的
+
+### 2.1 核心心智模型
+
+CUDA 的模型是 **"提交-执行"分离**：
+
+- 你写 `y = x * 2`，PyTorch 把内核**提交**到当前 stream 的队列里，**CPU 立刻返回**，继续跑下一行 Python；
+- GPU 在后台排队执行这些内核。
+
+所以整个程序的执行是"CPU 超前于 GPU"的（异步流水线）。大部分时候这是好事——CPU 在等 GPU 的时候可以提前提交更多工作，隐藏延迟。
+
+### 2.2 什么操作会触发同步
+
+一旦你需要**把数据从 GPU 拿回 CPU**，就必须等 GPU 干完活，于是发生隐式阻塞：
+
+```python
+y = x * 2
+v = y.item()      # 阻塞：必须等 y 计算完成才能取值
+arr = y.cpu()     # 阻塞：数据拷贝回 CPU
+print(y)          # 阻塞：打印需要先读到数据
+y.numpy()         # 阻塞（需要先 .cpu()）
+```
+
+还有**设备切换** `x.cuda()` / `.to("cuda")` 首次拷贝，也涉及同步。
+
+### 2.3 显式同步
+
+```python
+torch.cuda.synchronize()   # 阻塞 CPU，直到当前设备上所有已提交工作完成
+```
+
+两条实践准则：
+
+1. **调试时**：遇到莫名结果/时序问题，先在各步之间加 `torch.cuda.synchronize()` 定位；
+2. **性能上**：不要随便加。它会把流水线打空（CPU 等待 GPU），吞吐掉得厉害。
+
+### 2.4 Stream 与多流并发
+
+默认所有内核都在 **default stream（当前流）** 里串行执行。想重叠两个互不依赖的计算，用多流：
+
+```python
+s1 = torch.cuda.Stream()
+s2 = torch.cuda.Stream()
+
+with torch.cuda.stream(s1):
+    a = big_matmul(x, w)          # 提交到 s1
+with torch.cuda.stream(s2):
+    b = big_matmul(x2, w2)        # 提交到 s2，与 s1 并行执行
+
+torch.cuda.synchronize()
+```
+
+如果流之间有依赖，用 **Event** 让 GPU 自己排队，而不是把 CPU 卡住：
+
+```python
+start_ev = torch.cuda.Event()
+...
+s2.wait_event(ev_on_s1)   # s2 等待 s1 的某个事件后再继续
+```
+
+---
+
+## 三、性能计时：为什么 `time.time()` 是错的
+
+### 3.1 经典错误
+
+```python
+import time
+
+t0 = time.time()
+y = big_matmul(x, w)      # 内核只是"提交"，没执行！
+print(time.time() - t0)   # 测到的是提交开销，几乎是 0，完全没意义
+```
+
+由于异步，CPU 测到的时间跟 GPU 实际执行时间完全脱钩。
+
+### 3.2 正确做法一：CUDA Event 计时（推荐）
+
+```python
+import torch
+
+def bench(fn, iters=10):
+    # 预热：把内核、cuDNN heuristics 都跑热
+    fn()
+    torch.cuda.synchronize()
+
+    start = torch.cuda.Event(enable_timing=True)
+    end   = torch.cuda.Event(enable_timing=True)
+
+    start.record()                 # 在 GPU 时间线上打点
+    for _ in range(iters):
+        fn()
+    end.record()
+    torch.cuda.synchronize()       # 关键：等 GPU 全部完成
+
+    return start.elapsed_time(end) / iters   # 单位毫秒，纯 GPU 时间
+
+x = torch.randn(4096, 4096, device="cuda")
+w = torch.randn(4096, 4096, device="cuda")
+
+print(f"matmul avg: {bench(lambda: x @ w):.3f} ms")
+```
+
+Event 计时是在 **GPU 自己的时间线**上打点求差，测得的是真实的 GPU 执行时间，不受 CPU 调度噪声影响。
+
+### 3.3 正确做法二：synchronize + time
+
+```python
+t0 = time.time()
+y = x @ w
+torch.cuda.synchronize()          # 先同步再取时间
+print((time.time() - t0) * 1000, "ms")   # 包含 CPU 提交开销，适合测端到端
+```
+
+### 3.4 生产级工具：`torch.profiler`
+
+逐算子级别的性能分析（哪一步最慢、内核占用率、显存分配）用 profiler：
+
+```python
+from torch.profiler import profile, ProfilerActivity
+
+with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+    for _ in range(10):
+        y = x @ w
+    torch.cuda.synchronize()
+
+print(prof.key_averages().table(
+    sort_by="cuda_time_total", row_limit=10))
+```
+
+输出会按算子列出 CUDA 耗时、CPU 耗时、调用次数——这是定位瓶颈的正规工具。
