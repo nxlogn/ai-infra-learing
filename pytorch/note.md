@@ -1190,3 +1190,180 @@ print(prof.key_averages().table(
 ```
 
 输出会按算子列出 CUDA 耗时、CPU 耗时、调用次数——这是定位瓶颈的正规工具。
+
+# 自定义 C++ / CUDA 算子
+
+## 一、什么是自定义算子
+
+在深度学习框架（PyTorch / TensorFlow 等）里，**算子（Operator / Op）** 是构成计算图的最小单元，比如 `conv2d`、`matmul`、`relu`。
+
+**自定义算子**就是框架官方没有提供、或官方实现满足不了你的需求，由你自己用 C++ / CUDA 写出来并注册进框架的算力单元。
+
+典型组成：
+
+| 层次       | 作用                            | 技术                               |
+| ---------- | ------------------------------- | ---------------------------------- |
+| 前端注册层 | 让 Python 能调用、接入 autograd | `torch.library`、`pybind11`        |
+| 调度层     | 张量分发、类型/设备分发         | ATen、`AT_DISPATCH_FLOATING_TYPES` |
+| 计算层     | 真正的数值计算                  | CUDA kernel / C++ 并行             |
+
+---
+
+## 二、为什么需要自定义算子
+
+1. **性能**：官方算子通用但有开销。自定义可以做**算子融合**（如 `add + relu + layernorm` 合成一个 kernel），减少显存读写。
+2. **框架支持不足**：新算子、科研中的特殊算法官方还没实现（如某些稀疏算子、量化算子）。
+3. **算子融合与显存优化**：大模型推理中，KV-Cache、FlashAttention 这类都是高度定制 kernel。
+4. **硬件特性**：用到 Tensor Core、`__shfl`、共享内存、TMA 等官方算子没用上的能力。
+
+---
+
+## 三、主流实现方式
+
+### 1. `torch.utils.cpp_extension`（最常用，入门首选）
+
+用 `load_inline` 快速试验，用 `CUDAExtension` 做正式工程化编译。
+
+### 2. `torch.library` + C++（PyTorch 2.x 推荐）
+
+新式注册 API，能更好地支持 `torch.compile`、FakeTensor、动态 shape。**现在的新项目推荐这条路。**
+
+### 3. Triton（另一个赛道）
+
+用 Python 写 kernel，编译器生成 PTX/SASS，比裸 CUDA 简单，性能接近手写。适合不想碰 CUDA C++ 的场景，但本文聚焦 C++/CUDA。
+
+---
+
+## 四、一个完整示例：自定义 ReLU（前置）CUDA 算子
+
+### C++ 包装 + 绑定（`relu.cpp`）
+
+```cpp
+#include <torch/extension.h>
+#include <cuda_runtime.h>
+
+// CUDA kernel 声明
+torch::Tensor relu_cuda_forward(torch::Tensor x);
+
+// 前向：检查合法性 + 调用 CUDA
+torch::Tensor relu_forward(torch::Tensor x) {
+    TORCH_CHECK(x.is_cuda(), "x must be a CUDA tensor");
+    TORCH_CHECK(x.scalar_type() == torch::kFloat32, "x must be float32");
+    return relu_cuda_forward(x.contiguous());
+}
+
+// 前向/反向注册（这里只注册 forward）
+PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+    m.def("forward", &relu_forward, "ReLU forward (CUDA)");
+}
+```
+
+### CUDA kernel（`relu_cuda.cu`）
+
+```cpp
+#include <torch/extension.h>
+#include <cuda_runtime.h>
+
+__global__ void relu_kernel(const float* __restrict__ in,
+                            float* __restrict__ out,
+                            int64_t n) {
+    int64_t i = blockIdx.x * (int64_t)blockDim.x + threadIdx.x;
+    if (i < n) out[i] = in[i] > 0.f ? in[i] : 0.f;
+}
+
+torch::Tensor relu_cuda_forward(torch::Tensor x) {
+    auto out = torch::empty_like(x);
+    int64_t n = x.numel();
+    const int threads = 256;
+    const int blocks = (n + threads - 1) / threads;
+    relu_kernel<<<blocks, threads>>>(
+        x.data_ptr<float>(), out.data_ptr<float>(), n);
+    return out;
+}
+```
+
+### 编译与调用（Python）
+
+```python
+from torch.utils.cpp_extension import load
+
+relu = load(
+    name="relu_ext",
+    sources=["relu.cpp", "relu_cuda.cu"],
+    extra_cuda_cflags=["-O3", "--use_fast_math"],
+    verbose=True,
+)
+
+import torch
+x = torch.randn(1 << 20, device="cuda")
+y = relu.forward(x)
+print(torch.allclose(y, torch.relu(x)))  # True
+```
+
+编译时你需要本机有 **CUDA Toolkit** 和 **nvcc**，`load()` 会自动调用 `ninja` / `setuptools` 构建。
+
+---
+
+## 五、接入反向传播（autograd）
+
+自定义算子想被训练使用，必须提供反向。两种方式：
+
+1. **`torch.autograd.Function`**：Python 里包一层，`forward` 调 C++、`backward` 也调 C++。
+2. **`torch.library` 注册 + `torch.autograd` 公式**：现代方式，更契合 `torch.compile`。
+
+以 `torch.library` 为例（PyTorch 2.x）：
+
+```cpp
+TORCH_LIBRARY(myops, m) {
+    m.def("relu(Tensor x) -> Tensor");
+}
+TORCH_LIBRARY_IMPL(myops, CUDA, m) {
+    m.impl("relu", &relu_cuda_forward);
+}
+```
+
+反向可用 `torch.library.register_autograd` 或手写 `backward` 注册。
+
+---
+
+## 六、关键技术点与性能优化
+
+| 技术点                   | 说明                                                         |
+| ------------------------ | ------------------------------------------------------------ |
+| `__restrict__` + `const` | 帮助编译器优化、避免寄存器复用错误                           |
+| 合并访存（coalesced）    | 相邻线程读相邻地址，最大化显存带宽                           |
+| 共享内存                 | 复用数据、减少全局显存访问（如矩阵分块）                     |
+| 向量化读写               | 用 `float4` / `int4` 一次搬 16 字节                          |
+| 减少分支发散             | warp 内分支一致，避免串行化                                  |
+| 算子融合                 | 多个 elementwise 操作合成一个 kernel，减少 kernel launch 与显存往返 |
+| 流（Stream）             | 用 CUDA stream 做异步与流水线                                |
+| `cudaOccupancy`          | 根据寄存器/共享内存占用选 block size                         |
+
+**瓶颈判断**：是 memory-bound（带宽瓶颈，如 elementwise）还是 compute-bound（算力瓶颈，如 matmul）。elementwise 类几乎一定 memory-bound，所以要尽量融入多个操作。
+
+---
+
+## 七、调试与验证工具
+
+- `compute-sanitizer`（旧名 `cuda-memcheck`）：检测越界、未初始化访存。
+- `nsys` / `ncu`（Nsight）：profiling，看 kernel 时间、占用率、带宽利用率。
+- `CUDA_LAUNCH_BLOCKING=1`：让 kernel 同步执行，便于定位报错。
+- 与官方实现对比：`torch.allclose` 验证数值一致性，注意浮点误差用 `rtol/atol`。
+
+---
+
+## 八、常见应用场景
+
+- **大模型**：FlashAttention、PagedAttention（vLLM）、KV-Cache 管理、RoPE。
+- **量化**：INT8/INT4 反量化、混合精度算子。
+- **稀疏**：稀疏矩阵乘、稀疏注意力。
+- **特殊激活 / 融合**：Fused MLP、Fused LayerNorm。
+- **领域算子**：3D 点云、图神经网络、自定义损失函数。
+
+---
+
+## 小结
+
+自定义 C++/CUDA 算子的核心公式是：
+
+> **一个 CUDA kernel 负责算 + 一个 C++ 层负责张量/类型/设备检查 + 一层绑定让它能从 Python 调用并接入 autograd。**
