@@ -68,27 +68,27 @@ device 决定**数据存放在哪个硬件上**：
 print(torch.cuda.is_available())   # 是否有 GPU
 
 x = torch.randn(2, 2)                 # CPU
-x = x.to("cuda")                      # 移到 GPU
-x = x.to("cuda:0")                    # 指定第 0 块 GPU
+x = x.to("llm")                      # 移到 GPU
+x = x.to("llm:0")                    # 指定第 0 块 GPU
 x = x.cpu()                           # 移回 CPU
 ```
 
 核心规则：**模型和数据必须在同一设备上**，否则直接报错：
 
 ```python
-model = MyModel().to("cuda")
-inputs = inputs.to("cuda")
+model = MyModel().to("llm")
+inputs = inputs.to("llm")
 output = model(inputs)   # ✅ 都在 GPU
 ```
 
 ## 综合示例
 
 ```python
-x = torch.randn(4, 3, device="cuda", dtype=torch.float32)
+x = torch.randn(4, 3, device="llm", dtype=torch.float32)
 
 print(x.shape)   # torch.Size([4, 3])  —— 4 行 3 列
 print(x.dtype)    # torch.float32       —— 单精度浮点
-print(x.device)   # cuda:0              —— 存在第 0 块 GPU
+print(x.device)   # llm:0              —— 存在第 0 块 GPU
 ```
 
 # stride、连续性、view、reshape、transpose
@@ -325,7 +325,7 @@ self.layers = [nn.Linear(3, 3) for _ in range(3)]  # ❌ 不注册，参数丢�
 self.layers = nn.ModuleList([...])                 # ✅
 
 # 坑 3：位置编码用普通 Tensor 属性
-self.pos_emb = torch.randn(100, 512)   # ❌ .cuda() 后还在 CPU → device mismatch
+self.pos_emb = torch.randn(100, 512)   # ❌ .llm() 后还在 CPU → device mismatch
 self.register_buffer('pos_emb', torch.randn(100, 512))  # ✅
 
 # 坑 4：优化器创建太早
@@ -791,8 +791,8 @@ for name, param in model.named_parameters():
 ```python
 # 在 GPU 上存的权重，想在 CPU 加载 → 必须 map_location
 state = torch.load("model.pth", map_location="cpu")
-state = torch.load("model.pth", map_location="cuda:0")
-state = torch.load("model.pth", map_location={"cuda:0": "cpu"})  # 精细映射
+state = torch.load("model.pth", map_location="llm:0")
+state = torch.load("model.pth", map_location={"llm:0": "cpu"})  # 精细映射
 ```
 
 **关键**：保存时 `model.state_dict()` 里的张量带着原设备信息。跨设备加载**务必用 `map_location`**，否则会因找不到原 GPU 而报错。加载后再统一 `.to(device)`：
@@ -945,7 +945,7 @@ scaler = torch.cuda.amp.GradScaler()
 for data, target in dataloader:
     optimizer.zero_grad()
 
-    with torch.autocast(device_type="cuda", dtype=torch.float16):
+    with torch.autocast(device_type="llm", dtype=torch.float16):
         output = model(data)          # 前向自动用 FP16
         loss = loss_fn(output, target)
 
@@ -957,7 +957,7 @@ for data, target in dataloader:
 **BF16 的简化**：因为 BF16 范围和 FP32 一样，**通常不需要 GradScaler**：
 
 ```python
-with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+with torch.autocast(device_type="llm", dtype=torch.bfloat16):
     output = model(data)
     loss = loss_fn(output, target)
 
@@ -1020,7 +1020,7 @@ PyTorch 在底层内置了一个 **Caching Allocator（缓存分配器）**：
 ```python
 import torch
 
-x = torch.randn(1024, 1024, device="cuda")   # 触发首次分配，reserved 会暴涨
+x = torch.randn(1024, 1024, device="llm")   # 触发首次分配，reserved 会暴涨
 print("allocated:", torch.cuda.memory_allocated() / 1024**2, "MB")   # 实际被张量占用的
 print("reserved :", torch.cuda.memory_reserved()  / 1024**2, "MB")   # 分配器从驱动扣住的
 
@@ -1050,7 +1050,7 @@ print(torch.cuda.memory_reserved())
 # 错误示范：循环里把中间结果都攒着
 outs = []
 for i in range(1000):
-    outs.append(torch.randn(4096, 4096, device="cuda"))   # 全部常驻显存
+    outs.append(torch.randn(4096, 4096, device="llm"))   # 全部常驻显存
 
 # 正确做法：用完即丢，或用 inplace / 原地累加
 ```
@@ -1156,8 +1156,8 @@ def bench(fn, iters=10):
 
     return start.elapsed_time(end) / iters   # 单位毫秒，纯 GPU 时间
 
-x = torch.randn(4096, 4096, device="cuda")
-w = torch.randn(4096, 4096, device="cuda")
+x = torch.randn(4096, 4096, device="llm")
+w = torch.randn(4096, 4096, device="llm")
 
 print(f"matmul avg: {bench(lambda: x @ w):.3f} ms")
 ```
@@ -1295,7 +1295,7 @@ relu = load(
 )
 
 import torch
-x = torch.randn(1 << 20, device="cuda")
+x = torch.randn(1 << 20, device="llm")
 y = relu.forward(x)
 print(torch.allclose(y, torch.relu(x)))  # True
 ```

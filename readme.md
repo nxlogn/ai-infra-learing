@@ -22,7 +22,7 @@ cpplearn
 | 目录 | 内容 | 状态 |
 |:---:|------|:---:|
 | [cpp](./cpp) | C++ 语法要点与易错点 | 持续更新 |
-| [cuda](./cuda) | CUDA 并行编程 | 刚刚起步 |
+| [cuda](llm) | CUDA 并行编程 | 刚刚起步 |
 | [pytorch](./pytorch) | PyTorch 深度学习框架 | 刚刚起步 |
 
 ---

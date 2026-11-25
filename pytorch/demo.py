@@ -35,14 +35,14 @@
 
 # import torch
 
-# x = torch.randn(1024, 1024, device="cuda")   # 触发首次分配，reserved 会暴涨
-# print("allocated:", torch.cuda.memory_allocated() / 1024**2, "MB")   # 实际被张量占用的
-# print("reserved :", torch.cuda.memory_reserved()  / 1024**2, "MB")   # 分配器从驱动扣住的
+# x = torch.randn(1024, 1024, device="llm")   # 触发首次分配，reserved 会暴涨
+# print("allocated:", torch.llm.memory_allocated() / 1024**2, "MB")   # 实际被张量占用的
+# print("reserved :", torch.llm.memory_reserved()  / 1024**2, "MB")   # 分配器从驱动扣住的
 
 # # 释放张量后：allocated 下降，reserved 基本不动
 # del x
-# print("after del, allocated:", torch.cuda.memory_allocated() / 1024**2, "MB")
-# print("after del, reserved :", torch.cuda.memory_reserved()  / 1024**2, "MB")
+# print("after del, allocated:", torch.llm.memory_allocated() / 1024**2, "MB")
+# print("after del, reserved :", torch.llm.memory_reserved()  / 1024**2, "MB")
 
 import torch
 import torch.nn.functional as F
