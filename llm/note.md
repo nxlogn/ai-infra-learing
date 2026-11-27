@@ -423,4 +423,52 @@ $$\mathcal{L} = -\frac{1}{T}\sum_t \log p_\theta(x_t \mid x_{<t}) \quad \text{(n
 - **量化/剪枝会伤事实**：知识以分布式 key-value 形式存于 MLP，激进量化对长尾事实的损伤大于对"流畅度"的损伤——评测 perplexity 看不出知识丢失，要跑知识类 benchmark。
 - **预训练给"直觉"，推理时计算给"深思"**：next-token 预训练学出的是单步直觉（System 1），o1/R1 式 RL + 长思维链是在推理时把计算展开成多步（System 2）——test-time scaling 这条线正是承认"单步预测学不尽推理"后的补丁。
 
-**一句话总结：文本是世界投下的影子，next-token prediction 的 loss 就是压缩这份影子的码长——想把码长压到极限，就必须学会产生影子的那个世界的规律；压缩压力让"学规则"胜过"背答案"，事实落进 MLP 的 key-value、算法经 grokking 涌现、世界模型被 Othello-GPT 实证；但目标终究是"像人写的"而非"是真的"，幻觉与接地缺陷由此而来，RAG 和 test-time scaling 都是在给这个目标打补丁。**
+**文本是世界投下的影子，next-token prediction 的 loss 就是压缩这份影子的码长——想把码长压到极限，就必须学会产生影子的那个世界的规律；压缩压力让"学规则"胜过"背答案"，事实落进 MLP 的 key-value、算法经 grokking 涌现、世界模型被 Othello-GPT 实证；但目标终究是"像人写的"而非"是真的"，幻觉与接地缺陷由此而来，RAG 和 test-time scaling 都是在给这个目标打补丁。**
+
+## Q：训练算力公式 $C = 6ND$ 是怎么来的？
+
+$N$ = 模型参数量（不含 embedding），$D$ = 训练 token 数，$C$ = 总 FLOPs。系数 6 不是拟合出来的经验数，是**数出来的**：前向 2 + 反向 4。
+
+### 1. 前向：每个参数每个 token 用一次，$2N$
+
+Transformer 的算力几乎全在线性层。一个矩阵乘 $y = xW$，$W \in \mathbb{R}^{m \times n}$ 有 $mn$ 个参数；对**每个 token**，每个参数参与一次乘法和一次加法：
+
+$$\text{FLOPs}_{\text{forward}} = \underbrace{mn}_{\text{乘}} + \underbrace{mn}_{\text{加}} = 2mn = 2 \times \text{参数量}$$
+
+所有线性层加起来：**每 token 前向 $\approx 2N$ FLOPs**。激活函数、norm、softmax 都是 $O(d)$ 的逐元素操作，对比矩阵乘的 $O(d^2)$ 可忽略。
+
+### 2. 反向：一个矩阵乘变两个，$4N$
+
+设上游梯度 $g = \partial L / \partial y$，反向要算**两个**同样规模的矩阵乘：
+
+$$\frac{\partial L}{\partial x} = g W^T \quad (2mn \text{ FLOPs，传给前面的层})$$
+
+$$\frac{\partial L}{\partial W} = x^T g \quad (2mn \text{ FLOPs，交给优化器更新权重})$$
+
+每个参数对应 $2 + 2 = 4$ FLOPs：**每 token 反向 $\approx 4N$**。反向恰好是前向的 2 倍，不是巧合——链式法则对矩阵乘的两个操作数各求一次导，各是一个同尺寸 matmul。
+
+### 3. 合计
+
+$$C = \underbrace{2N}_{\text{前向}} + \underbrace{4N}_{\text{反向}} \ \text{每 token} \quad \Longrightarrow \quad C = 6ND$$
+
+### 4. 这个公式忽略了什么（修正项）
+
+- **Attention 的序列长度项**：$QK^T$ 和 $\alpha V$ 的算力依赖 $T$ 而不含参数，不在 $N$ 里。每层每 token 前向约 $4Td_{\text{model}}$ FLOPs；而每层参数约 $12d_{\text{model}}^2$（QKV+O 共 $4d^2$，MLP 共 $8d^2$），相对修正 $\approx T / (6d_{\text{model}})$。$T=4\text{k}, d=8\text{k}$ 时约 8%，可忽略；**长上下文 $T=128\text{k}$ 时 attention 反超，6ND 严重低估**。
+- **Embedding / LM head**：Kaplan 惯例不计入 $N$；词表很大时（LLaMA-3 的 128k）输出投影每 token $2Vd$ FLOPs，不可忽略。
+- **激活重计算（checkpointing）**：省显存换算力，反向时重跑一遍前向 → 系数变 **8**。
+- **MoE**：算力只由**激活参数**决定，$C \approx 6N_{\text{active}}D$；总参数决定的是显存，不是 FLOPs。
+- **计数惯例**：一次乘加算 1 FLOP（MAC 惯例）则公式是 $3ND$；业界统一按 2 计，看到 3 别慌。
+
+### 5. 它有什么用
+
+- **Scaling laws 的换算桥梁**：Kaplan / Chinchilla 把算力预算 $C$ 换成 $(N, D)$ 组合。Chinchilla 结论：计算最优时 $N \propto C^{0.5}$、$D \propto C^{0.5}$，约 **20 token/参数**——给定 $C=6ND$ 才能解出这个分配。
+- **MFU 的定义**：$\text{MFU} = 6ND \,/\, (\text{GPU 峰值 FLOPS} \times \text{时间} \times \text{卡数})$，衡量训练把硬件用得多满。
+- **预算估算**：LLaMA-7B 训 1T token：$6 \times 7\times10^9 \times 10^{12} = 4.2\times10^{22}$ FLOPs。A100 bf16 峰值 312 TFLOPS、按 50% MFU 算，约 **3100 A100·天**（千卡集群 3 天量级）。
+
+### 联系推理方向
+
+- **推理只有前向：每 token $\approx 2N$ FLOPs**，没有那个 4。prefill 一次算整段，$2NT$ FLOPs 摊在大量 token 上，compute-bound；decode 每步只算 1 个 token 的 $2N$ FLOPs，却要把 $2N$ 字节（bf16 权重）从 HBM 读一遍——**算术强度 $\approx 1$ FLOP/byte**，远低于 A100 的 ridge point（$\approx 150$），这就是 decode memory-bound 的定量根源。
+- 所以 decode 阶段看 MFU 没意义（必然极低），要看 **MBU**（带宽利用率）；continuous batching 的本质是把 batch 内多个 token 的 $2N$ 计算摊到同一次权重读取上，算术强度随 batch 线性涨。
+- MoE 的推理优势同一公式：读进显存的是总参数，但每 token 只算 $2N_{\text{active}}$——不过 decode 时专家权重的读取并不随激活比例减少，带宽收益要看 batch 和专家命中率。
+
+**系数 6 = 前向 2（每参数一次乘加）+ 反向 4（对输入和权重各一个同尺寸 matmul），逐 token 数 FLOPs 数出来的；attention 长度项、重计算、MoE、词表投影是四大修正项；它既是 scaling law 和 MFU 的地基，也反衬出推理端"只有 2N、且被带宽卡死"的 decode 本质。**
